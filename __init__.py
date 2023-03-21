@@ -1,6 +1,8 @@
+import bpy
+from .ui import BrainCapGen_UI
 
 bl_info = {
-    "name": "NIRSCapGen",
+    "name": "BrainCapGen",
     "author": "(c) 2023 Ashlyn McCann, (c) 2023 Qianqian Fang",
     "version": (1, 0),  # min plug-in version
     "blender": (2, 82, 0),  # min blender version
@@ -13,24 +15,10 @@ bl_info = {
 }
 
 def register():
-    print("Registering BlenderPhotonics")
-    bpy.utils.register_class(scene2mesh)
-    bpy.utils.register_class(object2surf)
-    bpy.utils.register_class(niifile)
-    bpy.utils.register_class(nii2mesh)
-    bpy.utils.register_class(mesh2scene)
-    bpy.utils.register_class(runmmc)
-    bpy.utils.register_class(BlenderPhotonics_UI)
-    bpy.types.Scene.blender_photonics = PointerProperty(type=niifile)
+    print("Registering BrainCapGen")
+    bpy.utils.register_class(BrainCapGen_UI)
 
 
 def unregister():
-    print("Unregistering BlenderPhotonics")
-    bpy.utils.unregister_class(scene2mesh)
-    bpy.utils.unregister_class(object2surf)
-    bpy.utils.unregister_class(niifile)
-    bpy.utils.unregister_class(nii2mesh)
-    bpy.utils.unregister_class(mesh2scene)
-    bpy.utils.unregister_class(runmmc)
-    bpy.utils.unregister_class(BlenderPhotonics_UI)
-    del bpy.types.Scene.blender_photonics
+    print("Unregistering BrainCapGen")
+    bpy.utils.unregister_class(BrainCapGen_UI)

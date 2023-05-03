@@ -1,0 +1,76 @@
+import bpy
+import subprocess
+import sys
+from bpy.props import EnumProperty
+import addon_utils
+from bpy_extras.io_utils import ImportHelper
+from bpy.types import Operator, PropertyGroup
+from bpy.props import StringProperty, CollectionProperty
+import os
+##How can I make it so that the headmesh gets imported with the correct name, and if its the brain mesh naming that
+class select_model(Operator,ImportHelper):
+    
+    bl_label = 'Select a head model'
+    bl_description = "Access a folder called Models"
+    bl_idname = 'braincapgen.select_model'
+
+    action: EnumProperty(
+        items=[
+            ('ADD_HEADMESH', 'add headmesh', 'add headmesh'),
+            ('ADD_BRAIN1020MESH', 'add brain1020mesh', 'add brain1020mesh')
+        ]
+    )
+
+    filename_ext = ".stl, .off"
+    filter_glob: StringProperty(
+            default="*.stl;*.off",
+            options={'HIDDEN'},
+            )
+    files: CollectionProperty(type=PropertyGroup)
+    def execute(self,context):
+        bpy.ops.import_mesh.stl(filepath = self.filepath, axis_forward='-Z', axis_up='Y', filter_glob="*.obj;*.stl")
+        print("filepath=", self.filepath)
+        #obs.append(context.selected_objects[:])
+        bpy.context.object.rotation_euler[0] = 4.71239 ## I needed this line idk if eveyone will
+        obj = bpy.context.object
+
+        if self.action == 'ADD_HEADMESH':
+            self.add_headmesh(context=context)
+
+
+        elif self.action == 'ADD_BRAIN1020MESH':
+            self.add_brain1020mesh(context=context)
+
+             
+        return {"FINISHED"}
+    def invoke(self, context, event):    
+        for mod in addon_utils.modules():
+            if mod.bl_info['name'] == "BrainCapGen":
+                path = os.path.dirname(mod.__file__)
+                path = os.path.join(path,'Models')
+                print("path is", path)
+                obs = []
+                self.filepath= path
+                wm = context.window_manager.fileselect_add(self)
+                return {'RUNNING_MODAL'}
+    @staticmethod 
+    def add_headmesh(context):
+        obj = bpy.context.object
+        obj.name = "headmesh"
+        bpy.ops.object.duplicate_move(OBJECT_OT_duplicate={"linked":False, "mode":'TRANSLATION'}, TRANSFORM_OT_translate={"value":(0.212906, 0.0140968, 0.0237914), "orient_axis_ortho":'X', "orient_type":'GLOBAL', "orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)), "orient_matrix_type":'GLOBAL', "constraint_axis":(False, False, False), "mirror":False, "use_proportional_edit":False, "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, "snap":False, "snap_elements":{'INCREMENT'}, "use_snap_project":False, "snap_target":'CLOSEST', "use_snap_self":True, "use_snap_edit":True, "use_snap_nonedit":True, "use_snap_selectable":False, "snap_point":(0, 0, 0), "snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False, "cursor_transform":False, "texture_space":False, "remove_on_cancel":False, "view2d_edge_pan":False, "release_confirm":False, "use_accurate":False, "use_automerge_and_split":False})
+        obj_dup = bpy.context.object
+        obj_dup.hide_set(True)
+        obj_dup.name = "headmesh.001"
+
+        
+    @staticmethod
+    def add_brain1020mesh(context):
+        obj = bpy.context.object
+        obj.name = "brain1020mesh"
+        bpy.ops.object.duplicate_move(OBJECT_OT_duplicate={"linked":False, "mode":'TRANSLATION'}, TRANSFORM_OT_translate={"value":(0.212906, 0.0140968, 0.0237914), "orient_axis_ortho":'X', "orient_type":'GLOBAL', "orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)), "orient_matrix_type":'GLOBAL', "constraint_axis":(False, False, False), "mirror":False, "use_proportional_edit":False, "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, "snap":False, "snap_elements":{'INCREMENT'}, "use_snap_project":False, "snap_target":'CLOSEST', "use_snap_self":True, "use_snap_edit":True, "use_snap_nonedit":True, "use_snap_selectable":False, "snap_point":(0, 0, 0), "snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False, "cursor_transform":False, "texture_space":False, "remove_on_cancel":False, "view2d_edge_pan":False, "release_confirm":False, "use_accurate":False, "use_automerge_and_split":False})
+        obj_dup = bpy.context.object
+        obj_dup.hide_set(True)
+        obj_dup.name = "brain1020mesh.001"
+        
+        # Iterate through the selected files
+               

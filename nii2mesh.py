@@ -60,7 +60,7 @@ class nii2mesh(bpy.types.Operator):
             os.remove(os.path.join(outputdir,'volumemesh.jmsh'))
 
         # nii to mesh
-        niipath = bpy.context.scene.blender_photonics.path
+        niipath = bpy.context.scene.braincapgen.path
         print(niipath)
         if (len(niipath)==0):
             return

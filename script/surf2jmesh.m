@@ -1,4 +1,4 @@
-function nodedata=surf2jmesh(filename)
+function nodedata = surf2jmesh(filename)
 %
 % nodedata=surf2jmesh(filename)
 %

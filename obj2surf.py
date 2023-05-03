@@ -6,16 +6,17 @@
 
 To cite this work, please use the below information
 
-@article {BlenderPhotonics2022,
-  author = {Zhang, Yuxuang and Fang, Qianqian},
-  title = {{BlenderPhotonics -- a versatile environment for 3-D complex bio-tissue modeling and light transport simulations based on Blender}},
-  elocation-id = {2022.01.12.476124},
+@article{BlenderPhotonics2022,
+  author = {Yuxuan Zhang and Qianqian Fang},
+  title = {{BlenderPhotonics: an integrated open-source software environment for three-dimensional meshing and photon simulations in complex tissues}},
+  volume = {27},
+  journal = {Journal of Biomedical Optics},
+  number = {8},
+  publisher = {SPIE},
+  pages = {1 -- 23},
   year = {2022},
-  doi = {10.1101/2022.01.12.476124},
-  publisher = {Cold Spring Harbor Laboratory},
-  URL = {https://www.biorxiv.org/content/early/2022/01/14/2022.01.12.476124},
-  eprint = {https://www.biorxiv.org/content/early/2022/01/14/2022.01.12.476124.full.pdf},
-  journal = {bioRxiv}
+  doi = {10.1117/1.JBO.27.8.083014},
+  URL = {https://doi.org/10.1117/1.JBO.27.8.083014}
 }
 """
 
@@ -208,9 +209,9 @@ class OBJECT2SURF_OT_invoke_import(bpy.types.Operator,ImportHelper):
     bl_label = "Import Mesh"
     bl_description = "Import triangular surfaces in .json,.jmsh,.bmsh,.off,.medit,.stl,.smf,.gts"
 
-    filename_ext: "*.json;*.jmsh;*.bmsh;*.off;*.medit;*.stl;*.smf;*.gts"
+    #filename_ext: "*.json;*.jmsh;*.bmsh;*.off;*.medit;*.stl;*.smf;*.gts"
     filepath: bpy.props.StringProperty(default='',subtype='DIR_PATH')
-    filter_glob: bpy.props.StringProperty(
+    filter_glob = bpy.props.StringProperty(
             default="*.json;*.jmsh;*.bmsh;*.off;*.medit;*.stl;*.smf;*.gts",
             options={'HIDDEN'},
             description="Reading triangular surface mesh from *.json;*.jmsh;*.bmsh;*.off;*.medit;*.stl;*.smf;*.gts",
@@ -218,9 +219,16 @@ class OBJECT2SURF_OT_invoke_import(bpy.types.Operator,ImportHelper):
             )
 
     def execute(self, context):
+        if(bpy.context.scene.blender_photonics.backend == "octave"):
+                import oct2py as op
+                oc = op.Oct2Py()
+        else:
+                import matlab.engine as op
+                oc = op.start_matlab()
         oc = op.Oct2Py()
         oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),'script'))
         surfdata=oc.feval('surf2jmesh',self.filepath)
+        
         AddMeshFromNodeFace(surfdata['MeshVertex3'],(np.array(surfdata['MeshTri3'])-1).tolist(),'importedsurf')
 
         return {'FINISHED'}

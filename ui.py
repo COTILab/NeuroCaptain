@@ -1,12 +1,13 @@
 import bpy
-from .niifile import niifile
-from .nii2mesh import nii2mesh
 from .obj2surf import object2surf
-from .stlfile import stl_file_import
-from .initpoints import init_points
+from .file_import import file_import
+from .brain1020mesh import brain1020mesh
 from .decimate_mesh import decimate_mesh
 from .shapes import insert_shape
 from .headmodels import select_model
+from .geonode import geo_nodes
+from .dual_mesh import dual_mesh
+from .niifile import niifile
 
 class BrainCapGen_UI(bpy.types.Panel):
     bl_label = 'BrainCapGen v2023'
@@ -35,7 +36,7 @@ class BrainCapGen_UI(bpy.types.Panel):
         layout.separator()
         layout.label(text="Import head model (.stl or .off file)", icon='SHADING_SOLID')
         cols2m = layout.column()
-        cols2m.operator(stl_file_import.bl_idname,icon='IMPORT')
+        cols2m.operator(file_import.bl_idname,icon='IMPORT')
         
         layout.separator()
         layout.label(text = "Choose from predefined headatlases", icon = 'SHADING_SOLID')
@@ -44,6 +45,16 @@ class BrainCapGen_UI(bpy.types.Panel):
         rowmod.operator(select_model.bl_idname,text='Headmesh',icon='USER').action='ADD_HEADMESH'
         rowmod.operator(select_model.bl_idname,text='Brain1020Mesh', icon='OUTLINER_DATA_VOLUME').action='ADD_BRAIN1020MESH'
 
+
+        layout.separator()
+        layout.label(text = "Generate Brain-Landmarks Mesh", icon = 'MOD_REMESH')
+        rowbmesh = layout.row()
+        rowbmesh.operator(brain1020mesh.bl_idname,text='Select NZ',icon='USER').action='NZ_SELECT'
+        rowbmesh.operator(brain1020mesh.bl_idname,text='Select LPA',icon='USER').action='LPA_SELECT'
+        rowbmesh.operator(brain1020mesh.bl_idname,text='Select RPA',icon='USER').action='RPA_SELECT'
+        colbmesh = layout.column()
+        colbmesh.operator(brain1020mesh.bl_idname,text='Brain 10-20 Mesh',icon='OUTLINER_OB_POINTCLOUD').action='BRAIN1020_MESH'
+
         layout.separator()
         layout.label(text = "Alter the density of the headmesh", icon = 'PREFERENCES')
         coldec = layout.column()
@@ -51,9 +62,9 @@ class BrainCapGen_UI(bpy.types.Panel):
         
 
         layout.separator()
-        layout.label(text = "Generate Brain-Landmarks Mesh", icon = 'MOD_REMESH')
-        colinit = layout.column()
-        colinit.operator(init_points.bl_idname,icon='OUTLINER_OB_POINTCLOUD')
+        layout.label(text = "Convert to Dual Mesh", icon = 'PREFERENCES')
+        coldec = layout.column()
+        coldec.operator(dual_mesh.bl_idname,icon='MOD_DECIM')
 
         layout.separator()
         layout.label(text = "Choose cut out shape", icon = 'MESH_CYLINDER')
@@ -63,6 +74,10 @@ class BrainCapGen_UI(bpy.types.Panel):
         rowshape.operator(insert_shape.bl_idname,text='Triangle',icon='MARKER').action='ADD_TRIANGLE'
         rowshape.operator(insert_shape.bl_idname,text='select the object you customized for the cut out BEFORE pressing this button',icon='RESTRICT_SELECT_OFF').action='ADD_CUSTOM'
 
+        layout.separator()
+        layout.label(text = "Project Brain Landmarks to Head Surface", icon = 'PREFERENCES')
+        coldec = layout.column()
+        coldec.operator(geo_nodes.bl_idname,icon='MOD_DECIM')
         
         layout.separator()
         layout.label(text="Tutorials and Websites", icon='SHADING_SOLID')

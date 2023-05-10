@@ -25,15 +25,6 @@ class decimate_mesh(bpy.types.Operator):
 
 
 
-def register():
-    bpy.utils.register_class(decimate_mesh)
-
-
-def unregister():
-    bpy.utils.unregister_class(decimate_mesh)
-
-if __name__ == '__main__':
-    register()
 
 
 #bpy.ops.braincapgen.decimate_mesh('INVOKE_DEFAULT')

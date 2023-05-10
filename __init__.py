@@ -1,14 +1,16 @@
 import bpy
 from .ui import BrainCapGen_UI
 from bpy.props import PointerProperty
-from .niifile import niifile
 from .obj2surf import object2surf
-from .nii2mesh import nii2mesh
-from .stlfile import stl_file_import
-from .initpoints import init_points
+from .file_import import file_import
+from .brain1020mesh import brain1020mesh
 from.decimate_mesh import decimate_mesh
 from .shapes import insert_shape
 from .headmodels import select_model
+from .geonode import geo_nodes
+from .dual_mesh import dual_mesh
+from .niifile import niifile
+
 
 bl_info = {
     "name": "BrainCapGen",
@@ -28,14 +30,14 @@ def register():
     bpy.utils.register_class(BrainCapGen_UI)
     #bpy.utils.register_class(object2surf)    
     bpy.utils.register_class(niifile)
-    bpy.utils.register_class(nii2mesh)
-    bpy.utils.register_class(stl_file_import)
+    #bpy.utils.register_class(nii2mesh)
+    bpy.utils.register_class(file_import)
     bpy.utils.register_class(decimate_mesh)
     bpy.utils.register_class(insert_shape)
-    bpy.utils.register_class(init_points)
+    bpy.utils.register_class(brain1020mesh)
     bpy.utils.register_class(select_model)
-
-
+    bpy.utils.register_class(geo_nodes)
+    bpy.utils.register_class(dual_mesh)
     bpy.types.Scene.braincapgen = PointerProperty(type=niifile)
 
 

@@ -2,9 +2,9 @@ import bpy
 from bpy.types import Operator
 
 class decimate_mesh(bpy.types.Operator):
-    bl_label = "Modify the Density of Head Mesh"
     bl_idname = 'braincapgen.decimate_mesh'
-
+    bl_label = "Modify Mesh Density"
+    bl_description = "modify density of mesh after choosing Nz,Lpa,Rpa)"
     number : bpy.props.FloatProperty(name = "Decimate Ratio", default = 1)
 
     def execute(self, context):
@@ -13,9 +13,7 @@ class decimate_mesh(bpy.types.Operator):
         mod = obj.modifiers.new(name='decimate', type='DECIMATE')
         mod.decimate_type = 'COLLAPSE'
         mod.ratio = self.number
-       
-        #bpy.context.object.modifiers["Decimate"].ratio = 1  ###
-
+        bpy.ops.object.modifier_apply(modifier="mod")
         return{'FINISHED'}
     
     def invoke(self, context, event):
@@ -25,6 +23,3 @@ class decimate_mesh(bpy.types.Operator):
 
 
 
-
-
-#bpy.ops.braincapgen.decimate_mesh('INVOKE_DEFAULT')

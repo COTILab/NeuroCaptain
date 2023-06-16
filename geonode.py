@@ -1,33 +1,27 @@
 import random
 import time
-from bpy.types import Operator, PropertyGroup
-from bpy.types import Node
+from bpy.types import Operator, PropertyGroup,NodeLink
 import bpy
-
-
-################################################################
-# helper functions BEGIN
-################################################################
+from bpy.types import Operator, PropertyGroup, GeometryNode, FunctionNode, bpy_struct
+from bpy import context
 
 class geo_nodes(Operator):
 
     """Implement the geometry nodes"""
     bl_idname = "braincapgen.geo_nodes"
-    bl_label = "Apply geo nodes"
-    bl_description = "Takes the LandmarkMesh and make cut outs at those locations on the ehad surface mesh"
+    bl_label = "Project Brain Landmarks"
+    bl_description = "Takes the LandmarkMesh and make cut outs at those locations on the head surface mesh"
     bl_options = {'PRESET', 'UNDO'}
-    
+    bl_space_type = "VIEW_3D"
+    size_x : bpy.props.FloatProperty(name = "cutout_x", default = 3)
+    size_y : bpy.props.FloatProperty(name = "cutout_y", default = 3)
+
     def active_object():
         """
         returns the currently active object
         """
         return bpy.context.active_object
 
-
-
-    def set_fcurve_extrapolation_to_linear():
-        for fc in bpy.context.active_object.animation_data.action.fcurves:
-            fc.extrapolation = "LINEAR"
 
 
     def set_scene_props(fps, frame_count):
@@ -48,125 +42,144 @@ class geo_nodes(Operator):
         scene.frame_start = 1
 
 
-
-
-
     ################################################################
     # helper functions END
     ################################################################
-    @classmethod
-    def link_nodes_by_mesh_socket(node_tree, from_node, to_node,type_from,type_to):
+
+    @staticmethod 
+    def link_nodes_by_mesh_socket(node_tree, from_node, to_node, type_from, type_to):
         node_tree.links.new(from_node.outputs[type_from], to_node.inputs[type_to])
 
-    def create_node(node_tree, type_name, node_x_location, node_location_step_x=0):
+    @staticmethod
+    def create_node(node_tree, type_name, node_x_location, node_y_location,self):
         """Creates a node of a given type, and sets/updates the location of the node on the X axis.
         Returning the node object and the next location on the X axis for the next node.
         """
         node_obj = node_tree.nodes.new(type=type_name)
         node_obj.location.x = node_x_location
-        node_x_location += node_location_step_x
+        
+        node_obj.location.y = node_y_location
 
         return node_obj, node_x_location
 
-
-
-    def update_geo_node_tree(node_tree,self,context):
+    @staticmethod
+    def update_geo_node_tree(node_tree,self):
         """
         Adding a Cube Mesh, Subdiv, Triangulate, Edge Split, and Element scale geo node into the
         geo node tree
+
         Geo Node type names found here
         https://docs.blender.org/api/current/bpy.types.GeometryNode.html
         """
-        out_node = node_tree.node["Group Output"]
-        in_node  = node_tree.nodes["Group Input"]
-        align_euler = node_tree.nodes.new(type="FunctionNodeAlignEulerToVector")
+        out_node = node_tree.nodes["Group Output"]
+        global in_node
+        in_node = node_tree.nodes["Group Input"]
         node_x_location = 0
         node_location_step_x = 300
-        
+  ### ADDING NODES IN NODE EDITOR SPACE      
     #transform 
-        transform_node, node_x_location = create_node(node_tree, "GeometryNodeTransform", node_x_location, node_location_step_x)
-        transform_node.inputs["Rotation"].default_value = 0, 2, 0
+        transform_node, node_x_location = self.create_node(node_tree, "GeometryNodeTransform", 350, 400, self)
+        transform_node.inputs["Rotation"].default_value = 0, 0, 0
 
     #Geomtry Proximity 
-        geometry_proximity, node_x_location = create_node(node_tree, "GeometryNodeProximity", node_x_location, node_location_step_x)
+        geometry_proximity, node_x_location = self.create_node(node_tree, "GeometryNodeProximity", 600,150, self)
         geometry_proximity.target_element = 'FACES'
         
     #set position 
-        set_position, node_x_location = create_node(node_tree, "GeometryNodeSetPosition", node_x_location, node_location_step_x)
+        set_position, node_x_location =self.create_node(node_tree, "GeometryNodeSetPosition", 800,200, self)
         set_position.inputs["Offset"].default_value = 0, 0, 0
 
     #instance on points
-        instance_on_points, node_x_location = create_node(node_tree, "GeometryNodeInstanceOnPoints", node_x_location, node_location_step_x)
-        instance_on_points.inputs["Scale"].default_value = 3, 3, 3
+        instance_on_points, node_x_location = self.create_node(node_tree, "GeometryNodeInstanceOnPoints", 900,0,self)
+        global cutout_x, cutout_y
+        cutout_x = self.size_x
+        cutout_y = self.size_y
+        instance_on_points.inputs["Scale"].default_value = cutout_x, cutout_y, 3
+        
 
     #Mesh Boolean 
-        mesh_boolean, node_x_location = create_node(node_tree, "GeometryNodeMeshBoolean", node_x_location, node_location_step_x)
+        mesh_boolean, node_x_location = self.create_node(node_tree, "GeometryNodeMeshBoolean", 1500, 300, self)
         mesh_boolean.operation = 'DIFFERENCE'
         
     #Sample Nearest Surface
-        sample_nearest_surface, node_x_location = create_node(node_tree, "GeometryNodeSampleNearestSurface", node_x_location, node_location_step_x)
-        sample_nearest_surface.data_type = 'FLOAT_VECTOR'
+        global sample_nearest_surface
+        sample_nearest_surface , node_x_location  = self.create_node(node_tree, "GeometryNodeSampleNearestSurface", 150,-300,self)
+        sample_nearest_surface.data_type= 'FLOAT_VECTOR'
         
-    #Align Euler to Vector 
-        align_euler_to_vector, node_x_location = create_node(node_tree, "GeometryNodeScaleElements", node_x_location, node_location_step_x)
-        #align_euler_to_vector.axis = 'Z'
+    #Align Euler to Vector
+        global align_euler_vector
+        align_euler_vector, node_x_location = self.create_node(node_tree, "FunctionNodeAlignEulerToVector", 450,-300, self)
+        align_euler_vector.axis = 'Z'
         
     #BrainMesh 
-        object_info_brain, node_x_location = create_node(node_tree, "GeometryNodeObjectInfo", node_x_location, node_location_step_x)
-        bpy.data.node_groups["Geometry Nodes"].nodes["Object Info"].inputs[0].default_value = bpy.data.objects["LandmarkMesh"]
+        object_info_brain, node_x_location = self.create_node(node_tree, "GeometryNodeObjectInfo", 150, 300,self)
+        object_info_brain.inputs["Object"].default_value = bpy.data.objects["LandmarkMesh"]
 
     #cutout 
 
-        object_info_cutout, node_x_location = create_node(node_tree, "GeometryNodeObjectInfo", node_x_location, node_location_step_x)
-        bpy.data.node_groups["Geometry Nodes"].nodes["Object Info"].inputs[0].default_value = bpy.data.objects["cutout"]
+        object_info_cutout, node_x_location = self.create_node(node_tree, "GeometryNodeObjectInfo", 500,0,self)
+        object_info_cutout.inputs["Object"].default_value = bpy.data.objects["cutout"]
         
-    #normal 
-        normal_node, node_x_location = create_node(node_tree, "GeometryNodeInputNormal", node_x_location, node_location_step_x)
-        out_node.location.x = node_x_location
-
-        link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node=geometry_proximity, type_from= 'Geometry',type_to='Target')
-        link_nodes_by_mesh_socket(node_tree, from_node=geometry_proximity, to_node=set_position, type_from = 'Position', type_to = 'Position')
-        link_nodes_by_mesh_socket(node_tree, from_node=set_position, to_node=instance_on_points, type_from= 'Geometry', type_to = 'Points')
-        link_nodes_by_mesh_socket(node_tree, from_node=instance_on_points, to_node=mesh_boolean, type_from= 'Instances', type_to = 'Mesh 2')
-        link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node=object_info_brain, type_from= 'Object', type_to = 'Object')
-        link_nodes_by_mesh_socket(node_tree, from_node=object_info_brain, to_node= transform_node, type_from= 'Geometry', type_to = 'Geometry')
-        link_nodes_by_mesh_socket(node_tree, from_node=transform_node, to_node = set_position, type_from= 'Geometry', type_to = 'Geometry')
-        link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node = object_info_cutout, type_from= 'Object', type_to = 'Object')
-        link_nodes_by_mesh_socket(node_tree, from_node=object_info_cutout, to_node = instance_on_points, type_from= 'Geometry', type_to = 'Instance')
-        link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node = mesh_boolean, type_from= 'Geometry', type_to = 'Mesh 1')
-        link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node = sample_nearest_surface, type_from= 'Geometry', type_to = 'Mesh')
-        link_nodes_by_mesh_socket(node_tree, from_node=normal_node, to_node = sample_nearest_surface, type_from= 'Normal', type_to = 'Value')
-        link_nodes_by_mesh_socket(node_tree, from_node=sample_nearest_surface, to_node = align_euler, type_from= 'Value', type_to = 'Vector')
-        link_nodes_by_mesh_socket(node_tree, from_node=align_euler, to_node = instance_on_points, type_from= 'Rotation', type_to = 'Rotation')
+    #normal
+        global normal_node
+        normal_node, node_x_location = self.create_node(node_tree, "GeometryNodeInputNormal",-50, -350,self)
         
         
-        from_node = mesh_boolean
-        to_node = out_node
-        node_tree.links.new(from_node.outputs["Mesh"], to_node.inputs["Geometry"])
+        out_node.location.x = 1800
+        out_node.location.y = 300
 
-     
-    def create_centerpiece(self,context):
-        #selected_objects = bpy.context.selected_objects
-        #active_object = bpy.context.active_object
-        bpy.context.view_layer.objects.active = context.scene.objects.get('headmesh') 
-        bpy.data.objects['headmesh'].select_set(True)
-        bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.ops.node.new_geometry_nodes_modifier()
-        node_tree = bpy.data.node_groups["Geometry Nodes"]
+    ### LINKING THE NODES 
+        self.link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node=geometry_proximity, type_from= 'Geometry',type_to='Target')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=geometry_proximity, to_node=set_position, type_from = 'Position', type_to = 'Position')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=set_position, to_node=instance_on_points, type_from= 'Geometry', type_to = 'Points')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=set_position, to_node=instance_on_points, type_from= 'Geometry', type_to = 'Points')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=instance_on_points, to_node=mesh_boolean, type_from= 'Instances', type_to = 'Mesh 2')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=transform_node, to_node = set_position, type_from= 'Geometry', type_to = 'Geometry')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=object_info_cutout, to_node = instance_on_points, type_from= 'Geometry', type_to = 'Instance')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node = mesh_boolean, type_from= 'Geometry', type_to = 'Mesh 1')
+        self.link_nodes_by_mesh_socket(node_tree, from_node=in_node, to_node = sample_nearest_surface, type_from= 'Geometry', type_to = 'Mesh')
+        node_tree.links.new(object_info_brain.outputs["Geometry"], transform_node.inputs["Geometry"])
+        node_tree.links.new(in_node.outputs["Geometry"], sample_nearest_surface.inputs["Mesh"])
+        node_tree.links.new(align_euler_vector.outputs["Rotation"], instance_on_points.inputs["Rotation"])
+        #final output
+        node_tree.links.new(mesh_boolean.outputs["Mesh"], out_node.inputs["Geometry"])
 
-        self.update_geo_node_tree(node_tree,context)
-        #bpy.context.view_layer.objects.active
-        
 
-        bpy.context.active_object.modifiers["GeometryNodes"].is_active = True
-
-
+   
     def execute(self, context):
-        """
-        Python code to generate an animated geo nodes node tree
-        that consists of a subdivided & triangulated cube with animated faces
-        """
+        bpy.ops.object.mode_set(mode='OBJECT') 
+        bpy.data.objects['headmesh'].select_set(True)
+        head = bpy.data.objects['headmesh']
+        mod = head.modifiers.new(name='solidify', type='SOLIDIFY')
+        #bpy.ops.object.modifier_apply(modifier="solidify")
+        bpy.ops.object.modifier_apply(modifier="solidify")
+        bpy.data.objects['headmesh'].select_set(True)
+        bpy.ops.node.new_geometry_nodes_modifier()
+        global node_tree
+        node_tree = bpy.data.node_groups["Geometry Nodes"]
+        
+        self.update_geo_node_tree(node_tree,self)
+        
+        node_tree.links.new(normal_node.outputs["Normal"], sample_nearest_surface.inputs[3])
+        node_tree.links.new(sample_nearest_surface.outputs[2], align_euler_vector.inputs["Vector"])
+        cuthide = bpy.data.objects["cutout"]
+        cuthide.hide_set(True)
+        brainhide = bpy.data.objects["LandmarkMesh"]
+        brainhide.hide_set(True)
+        bpy.ops.object.modifier_apply(modifier="GeometryNodes")
+        
+        bpy.context.view_layer.objects.active = head
 
-        self.create_centerpiece(context)
         return {"FINISHED"}
-       
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+     
+
+
+   
+
+   
+
+
+   

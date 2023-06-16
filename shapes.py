@@ -2,12 +2,17 @@ import bpy
 from bpy.props import EnumProperty
 from bpy.types import Operator
 from bpy.utils import register_class, unregister_class
- 
 
+ 
+enum_action=[('ADD_CYLINDER', 'circle', 'add cylinder for circular cutouts'),
+            ('ADD_CUBE', 'square', 'add cube for square cutouts'),
+            ('ADD_TRIANGLE', 'triangle', 'add triangle prism for triangle cutouts'),
+            ('ADD_CUSTOM', 'custom', 'select a mesh for the cutouts')]
+  
 class insert_shape(Operator):
     bl_idname = 'braincapgen.insert_shape'
-    bl_label = 'insertshape'
-    bl_description = 'inserts a shape'
+    bl_label = 'insert shape'
+    bl_description = 'inserts a shape for the cutouts at the brain landmark points'
     bl_options = {'REGISTER', 'UNDO'}
  
     action: EnumProperty(
@@ -18,6 +23,16 @@ class insert_shape(Operator):
             ('ADD_CUSTOM', 'add custom', 'add custom')
         ]
     )
+
+
+    @classmethod
+    def description(cls, context, properties):
+        hints={}
+        for item in enum_action:
+            hints[item[0]]=item[2]
+        return hints[properties.action]
+
+
 
     def execute(self, context):
         if self.action == 'ADD_CYLINDER':

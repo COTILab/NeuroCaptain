@@ -11,12 +11,15 @@ from bpy.types import Operator, PropertyGroup
 import os
 from bpy.props import EnumProperty, StringProperty, CollectionProperty
 
-#mode = bpy.context.active_object.mode
-#bpy.ops.object.mode_set(mode = 'OBJECT')
+enum_action=[('NZ_SELECT', 'nz_select', 'select the vertice closest to Nz, then press okay'),
+            ('LPA_SELECT', 'lpa_select', 'select the vertice closest to Lpa, then press okay'),
+            ('RPA_SELECT', 'RPA_select', 'select the vertice closest to Rpa, then press okay'),
+            ('BRAIN1020_MESH', 'brain1020_mesh', 'enter p1 and p2 corresponding to 10(p1)-20(p2) points, then press okay')]
+
 
 class brain1020mesh(Operator):
     bl_label = 'Select vertices to calculate 10-20 points'
-    bl_description = "Click this button to "
+    bl_description = "Click this button to generate mesh from brain landmarks "
     bl_idname = 'braincapgen.init_points'
     action: EnumProperty(
         items=[
@@ -28,12 +31,17 @@ class brain1020mesh(Operator):
     )
     point1 : bpy.props.FloatProperty(name = "p1", default = 10)
     point2 : bpy.props.FloatProperty(name = "p2", default = 10)
-   # bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def description(cls, context, properties):
+        hints={}
+        for item in enum_action:
+            hints[item[0]]=item[2]
+        return hints[properties.action]
 
     def execute(self,context):
         outputdir = GetBPWorkFolder();
         obj = bpy.context.view_layer.objects.active
-        #take selected points and save to file
         bpy.ops.object.mode_set(mode='OBJECT')
 
         if self.action == 'NZ_SELECT':
@@ -46,33 +54,24 @@ class brain1020mesh(Operator):
             self.rpa_select(context=context)
 
         elif self.action == 'BRAIN1020_MESH':
-            #point1 : bpy.props.FloatProperty(name = "p1", default = 10)
-            #point2 : bpy.props.FloatProperty(name = "p2", default = 10)
             global p1, p2
-            #global p2
             p1 = self.point1
             p2 = self.point2
             self.brain1020_mesh(context=context)
 
+    
+
         return {"FINISHED"}
             
-       
-
-    #def execute(self, context):
-    #    print("begin to calculate 10-20 landmarks")
-     #   self.func()
-    #    return {"FINISHED"}
 
     def invoke(self, context, event):
-        #if self.action == 'BRAIN1020_MESH':
         return context.window_manager.invoke_props_dialog(self)
 
     @staticmethod
     def nz_select(context):
+        #select vertice cloest to Nz
         bpy.ops.object.mode_set(mode='OBJECT')
         obj = bpy.context.view_layer.objects.active
-        #vert = obj.data.vertices[n].co
-        #take selected points and save to file
         bpy.ops.object.mode_set(mode='OBJECT')
         selectedverts_nz = [v for v in bpy.context.active_object.data.vertices if v.select]
         
@@ -84,14 +83,14 @@ class brain1020mesh(Operator):
         global nz 
         nz = np.array(vselect_nz)
         print(nz)
-        pass
+        return nz
+        
 
     @staticmethod
     def lpa_select(context):
+        #select vertice cloest to Lpa
         bpy.ops.object.mode_set(mode='OBJECT')
         obj = bpy.context.view_layer.objects.active
-        #vert = obj.data.vertices[n].co
-        #take selected points and save to file
         bpy.ops.object.mode_set(mode='OBJECT')
         selectedverts_lpa = [v for v in bpy.context.active_object.data.vertices if v.select]
         
@@ -102,14 +101,14 @@ class brain1020mesh(Operator):
             vselect_lpa.append(v_global_lpa)
         global lpa 
         lpa= np.array(vselect_lpa)
-        pass 
+        return lpa
+        
 
     @staticmethod
     def rpa_select(context):
+        #select vertice cloest to Rpa
         bpy.ops.object.mode_set(mode='OBJECT')
         obj = bpy.context.view_layer.objects.active
-        #vert = obj.data.vertices[n].co
-        #take selected points and save to file
         bpy.ops.object.mode_set(mode='OBJECT')
         selectedverts_rpa = [v for v in bpy.context.active_object.data.vertices if v.select]
         
@@ -120,15 +119,17 @@ class brain1020mesh(Operator):
             vselect_rpa.append(v_global_rpa)
         global rpa    
         rpa= np.array(vselect_rpa)
-
-        pass
+        return rpa 
+    
 
     @staticmethod
     def brain1020_mesh(context):
         outputdir = GetBPWorkFolder();
         obj = bpy.context.view_layer.objects.active
+        #the intial points Brain1020 uses 
         vs = np.vstack((nz, lpa, rpa))
         verts = []
+        #saving the head mesh from the scene 
         for n in range(len(obj.data.vertices)):
             vert = obj.data.vertices[n].co
             v_global = obj.matrix_world @ vert
@@ -141,7 +142,7 @@ class brain1020mesh(Operator):
             'MeshVertex3':v, 'MeshTri3':f, 'param': {'initpoints':vs, 'p1':p1, 'p2':p2}}
         jd.save(meshdata,os.path.join(outputdir,'brain1020input.jmsh'))
 
-            #Use these files as inputs for a brain mesh generation script in Matlab
+            
         try:
             if(bpy.context.scene.blender_photonics.backend == "octave"):
                 import oct2py as op
@@ -154,7 +155,7 @@ class brain1020mesh(Operator):
         oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),'script'))
         oc.feval('brain1020mesh',os.path.join(outputdir,'brain1020input.jmsh'))
 
-            #load the resulting file
+        #load the resulting file with the brain1020 mesh 
         outputmesh=jd.load(os.path.join(outputdir,'brain1020output.jmsh'))
         AddMeshFromNodeFace(outputmesh['MeshVertex3'],(np.array(outputmesh['MeshTri3'])-1).tolist(),'LandmarkMesh');
         bpy.context.view_layer.objects.active=bpy.data.objects['LandmarkMesh']
@@ -180,8 +181,4 @@ if __name__ == "__main__":
 
         bpy.ops.braincapgen.brain1020mesh('INVOKE_DEFAULT')
 
-# add object to scene 
 
-#oct2py.feval 
-
-#import the brain mesh from matlab and put in scene 

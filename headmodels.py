@@ -81,7 +81,7 @@ class select_model(Operator,ImportHelper):
                 # Append Object(s) to the list
                 obs.append(context.selected_objects[:])
                 bpy.context.object.rotation_euler[0] = 4.71239 ## I needed this line idk if eveyone will
-                bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
+                #bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
                 obj = bpy.context.object
                 obj.name = "importedmodel"
                 
@@ -126,7 +126,7 @@ class select_model(Operator,ImportHelper):
         head = bpy.data.objects['importedmodel']
         bpy.ops.object.select_all(action='DESELECT')
         head.select_set(True)
-        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
+        bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
 
         
         
@@ -149,7 +149,7 @@ class select_model(Operator,ImportHelper):
         brain = bpy.data.objects['importedmodel']
         bpy.ops.object.select_all(action='DESELECT')
         brain.select_set(True)
-        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
+        #bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
         brain.name = "LandmarkMesh"
         return {"FINISHED"}
        

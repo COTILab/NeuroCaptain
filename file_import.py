@@ -96,7 +96,7 @@ class file_import(Operator,ImportHelper):
             head = bpy.data.objects['headmesh']
             bpy.ops.object.select_all(action='DESELECT')
             head.select_set(True)
-            bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
+            bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
 
             
             

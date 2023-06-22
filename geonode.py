@@ -114,6 +114,7 @@ class geo_nodes(Operator):
     #BrainMesh 
         object_info_brain, node_x_location = self.create_node(node_tree, "GeometryNodeObjectInfo", 150, 300,self)
         object_info_brain.inputs["Object"].default_value = bpy.data.objects["LandmarkMesh"]
+        object_info_brain.transform_space = 'RELATIVE'
 
     #cutout 
 

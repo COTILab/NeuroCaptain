@@ -167,6 +167,8 @@ class geo_nodes(Operator):
         cuthide.hide_set(True)
         brainhide = bpy.data.objects["LandmarkMesh"]
         brainhide.hide_set(True)
+        bpy.ops.object.modifier_apply(modifier="solidify")
+
         bpy.ops.object.modifier_apply(modifier="GeometryNodes")
         
         bpy.context.view_layer.objects.active = head

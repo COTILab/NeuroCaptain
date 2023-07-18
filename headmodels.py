@@ -12,7 +12,7 @@ import numpy as np
 import jdata as jd
 
 enum_action=[('ADD_HEADMESH', 'add headmesh', 'Access a folder called: HeadModels'),
-            ('ADD_BRAIN1020MESH', 'add brain1020mesh', 'Access a folder called: BrainPointsMeshes')]
+            ('ADD_BRAIN1020MESH', 'add brain1020mesh', 'Access a folder called: BrainLandmarks')]
 
 
 

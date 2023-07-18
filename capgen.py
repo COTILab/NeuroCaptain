@@ -9,7 +9,7 @@ enum_action=[('REFERENCE_POINT', 'reference_point', 'select Nz vertice, then pre
 class cap_generation(Operator):
     bl_label = "Generate NeuroCap"
     bl_idname = 'braincapgen.cap_generation'
-    bl_description = "Generate the Generic NeuroCap "
+    bl_description = "Generate the Generic Cap "
     action: EnumProperty(
         items=[
             ('REFERENCE_POINT', 'reference_point', 'reference_point'),
@@ -124,7 +124,10 @@ class cap_generation(Operator):
         bpy.context.view_layer.objects.active = head
         
     # make the bottom cut first, switch to edit mode and delete faces created by the cut
-        bpy.ops.object.mode_set(mode='OBJECT')
+        try:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        except:
+            pass
         bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
         bool_two.object = bottom
         bool_two.operation = 'DIFFERENCE'

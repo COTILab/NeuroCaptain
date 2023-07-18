@@ -4,7 +4,7 @@ from bpy.types import Operator
 class decimate_mesh(bpy.types.Operator):
     bl_idname = 'braincapgen.decimate_mesh'
     bl_label = "Modify Mesh Density"
-    bl_description = "modify density of mesh after choosing Nz,Lpa,Rpa)"
+    bl_description = "modify density of mesh AFTER Brain 10-20 Mesh (if applicable)"
     number : bpy.props.FloatProperty(name = "Decimate Ratio", default = 1)
 
     def execute(self, context):

@@ -9,7 +9,8 @@ from .headmodels import select_model
 from .geonode import geo_nodes
 from .dual_mesh import dual_mesh
 from .niifile import niifile
-from .capgen import cap_generation 
+from .capgen import cap_generation
+from .circumference import circumference_calc
 
 bl_info = {
     "name": "NeuroCaptain",
@@ -36,6 +37,7 @@ def register():
     bpy.utils.register_class(geo_nodes)
     bpy.utils.register_class(dual_mesh)
     bpy.utils.register_class(cap_generation)
+    bpy.utils.register_class(circumference_calc)
     bpy.types.Scene.neurocaptain = PointerProperty(type=niifile)
 
 

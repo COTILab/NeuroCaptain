@@ -22,30 +22,6 @@ class geo_nodes(Operator):
         """
         return bpy.context.active_object
 
-
-
-    def set_scene_props(fps, frame_count):
-        """
-        Set scene properties
-        """
-        scene = bpy.context.scene
-        scene.frame_end = frame_count
-
-        # set the world background to black
-        world = bpy.data.worlds["World"]
-        if "Background" in world.node_tree.nodes:
-            world.node_tree.nodes["Background"].inputs[0].default_value = (0, 0, 0, 1)
-
-        scene.render.fps = fps
-
-        scene.frame_current = 1
-        scene.frame_start = 1
-
-
-    ################################################################
-    # helper functions END
-    ################################################################
-
     @staticmethod 
     def link_nodes_by_mesh_socket(node_tree, from_node, to_node, type_from, type_to):
         node_tree.links.new(from_node.outputs[type_from], to_node.inputs[type_to])
@@ -151,10 +127,16 @@ class geo_nodes(Operator):
         bpy.ops.object.mode_set(mode='OBJECT') 
         bpy.data.objects['headmesh'].select_set(True)
         head = bpy.data.objects['headmesh']
-        mod = head.modifiers.new(name='solidify', type='SOLIDIFY')
+        #bpy.ops.object.modifier_add(type='SOLIDIFY')
+        head.modifiers.new(name='solidify', type='SOLIDIFY')
+      
         #bpy.ops.object.modifier_apply(modifier="solidify")
-        #bpy.ops.object.modifier_apply(modifier="solidify")
-        bpy.data.objects['headmesh'].select_set(True)
+
+        
+        head = bpy.context.scene.objects['headmesh']
+        bpy.ops.object.select_all(action='DESELECT') 
+        bpy.context.view_layer.objects.active = head  
+        head.select_set(True)
         bpy.ops.node.new_geometry_nodes_modifier()
         global node_tree
         node_tree = bpy.data.node_groups["Geometry Nodes"]
@@ -167,9 +149,10 @@ class geo_nodes(Operator):
         cuthide.hide_set(True)
         brainhide = bpy.data.objects["LandmarkMesh"]
         brainhide.hide_set(True)
-       # bpy.ops.object.modifier_apply(modifier="solidify")
 
-        #bpy.ops.object.modifier_apply(modifier="GeometryNodes")
+        bpy.ops.object.modifier_apply(modifier="solidify")
+
+        bpy.ops.object.modifier_apply(modifier="GeometryNodes")
         
         bpy.context.view_layer.objects.active = head
 
@@ -178,11 +161,6 @@ class geo_nodes(Operator):
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
      
-
-
-   
-
-   
 
 
    

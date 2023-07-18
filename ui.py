@@ -7,6 +7,7 @@ from .headmodels import select_model
 from .geonode import geo_nodes
 from .dual_mesh import dual_mesh
 from .capgen import cap_generation
+from .circumference import circumference_calc
 
 class NeuroCaptain_UI(bpy.types.Panel):
     bl_label = 'NeuroCaptain v2023'
@@ -78,7 +79,12 @@ class NeuroCaptain_UI(bpy.types.Panel):
         rowcap.operator(cap_generation.bl_idname,text='Reference (Nz)',icon='OUTLINER_OB_POINTCLOUD').action='REFERENCE_POINT'
         rowcap.operator(cap_generation.bl_idname,text='Cutout Placement',icon='META_CUBE').action='PLACE_CUTOUTS'
         colcap = layout.column()
-        colcap.operator(cap_generation.bl_idname,text='Generate NeuroCap',icon='MODIFIER_DATA').action='BOOLEAN_CUT'
+        colcap.operator(cap_generation.bl_idname,text='Generate Cap',icon='MODIFIER_DATA').action='BOOLEAN_CUT'
+
+        layout.separator()
+        layout.label(text = "Cap Circumference Calculator", icon = 'SHADING_SOLID')
+        colcirc = layout.column()
+        colcirc.operator(circumference_calc.bl_idname,icon='MOD_DECIM')
         
         
     

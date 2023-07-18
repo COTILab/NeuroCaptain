@@ -153,7 +153,7 @@ class geo_nodes(Operator):
         head = bpy.data.objects['headmesh']
         mod = head.modifiers.new(name='solidify', type='SOLIDIFY')
         #bpy.ops.object.modifier_apply(modifier="solidify")
-        bpy.ops.object.modifier_apply(modifier="solidify")
+        #bpy.ops.object.modifier_apply(modifier="solidify")
         bpy.data.objects['headmesh'].select_set(True)
         bpy.ops.node.new_geometry_nodes_modifier()
         global node_tree
@@ -167,9 +167,9 @@ class geo_nodes(Operator):
         cuthide.hide_set(True)
         brainhide = bpy.data.objects["LandmarkMesh"]
         brainhide.hide_set(True)
-        bpy.ops.object.modifier_apply(modifier="solidify")
+       # bpy.ops.object.modifier_apply(modifier="solidify")
 
-        bpy.ops.object.modifier_apply(modifier="GeometryNodes")
+        #bpy.ops.object.modifier_apply(modifier="GeometryNodes")
         
         bpy.context.view_layer.objects.active = head
 

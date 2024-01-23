@@ -15,4 +15,4 @@ face=volface(tet);
 
 meshdata.MeshVertex3 = points1; 
 meshdata.MeshTri3 = face; 
-brainmesh = savejson('',meshdata,'FileName',ncmwpath('brain1020output.jmsh'),'ArrayIndent',0);
+brainmesh = savejson('',meshdata,'FileName',bpmwpath('brain1020output.jmsh'),'ArrayIndent',0);

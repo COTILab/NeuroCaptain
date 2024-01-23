@@ -32,12 +32,11 @@ function tempname=bpmwpath(fname)
 % -- this function is part of BlenderPhotonics (http://mcx.space/bp)
 %
 
-%%%this function has been modified from BlenderPhotonics for NeuroCaptain
 if (nargin < 1) || isempty(fname)
     fname = '';
 end
 
-tdir=mwpath('neurocaptain') %this line has been changed for neurocaptain
+tdir=mwpath('blenderphotonics')
 if(exist(tdir)==0)
     mkdir(tdir)
 end

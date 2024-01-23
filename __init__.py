@@ -3,7 +3,7 @@ from .ui import NeuroCaptain_UI
 from bpy.props import PointerProperty
 from .file_import import file_import
 from .brain1020mesh import brain1020mesh
-from.decimate_mesh import decimate_mesh
+from .decimate_mesh import decimate_mesh
 from .shapes import insert_shape
 from .headmodels import select_model
 from .geonode import geo_nodes
@@ -20,14 +20,15 @@ bl_info = {
     "location": "Layout，UI",
     "description": "generate caps for fNIRS applications",
     "warning": "This plug-in requires the preinstallation of Iso2Mesh (http://iso2mesh.sf.net) and Brain2Mesh (http://mcx.space/brain2mesh/)",
-    "doc_url": "nonexistent", 
-    "tracker_url": "nonexistent", 
+    "doc_url": "nonexistent",
+    "tracker_url": "nonexistent",
     "category": "User Interface",
 }
 
+
 def register():
     print("Registering NeuroCaptain")
-    bpy.utils.register_class(NeuroCaptain_UI)    
+    bpy.utils.register_class(NeuroCaptain_UI)
     bpy.utils.register_class(niifile)
     bpy.utils.register_class(file_import)
     bpy.utils.register_class(decimate_mesh)

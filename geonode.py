@@ -126,6 +126,7 @@ class geo_nodes(Operator):
             node_tree, "GeometryNodeObjectInfo", 150, 300, self
         )
         object_info_brain.inputs["Object"].default_value = bpy.data.objects["LandmarkMesh"]
+        object_info_brain.transform_space = "RELATIVE"
 
         # cutout
         object_info_cutout, node_x_location = self.create_node(
@@ -238,12 +239,12 @@ class geo_nodes(Operator):
         cuthide.hide_set(True)
         brainhide = bpy.data.objects["LandmarkMesh"]
         brainhide.hide_set(True)
-        # apply geoemtry nodes- comment out following line to modify
+        # apply geoemtry nodes- comment out following line to modify ###
         bpy.ops.object.modifier_apply(modifier="GeometryNodes")
         bpy.ops.object.editmode_toggle()
         bpy.ops.mesh.delete(type="FACE")
         bpy.ops.object.editmode_toggle()
-
+        ###
         bpy.context.view_layer.objects.active = head
 
         return {"FINISHED"}

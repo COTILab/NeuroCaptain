@@ -102,8 +102,12 @@ class object2surf(bpy.types.Operator):
 
     bl_options = {"REGISTER", "UNDO"}
     action: bpy.props.EnumProperty(default=g_action, name="Operation", items=enum_action)
-    actionparam: bpy.props.FloatProperty(default=g_actionparam, name="Operation parameter")
-    convtri: bpy.props.BoolProperty(default=g_convtri, name="Convert to triangular mesh first")
+    actionparam: bpy.props.FloatProperty(
+        default=g_actionparam, name="Operation parameter"
+    )
+    convtri: bpy.props.BoolProperty(
+        default=g_convtri, name="Convert to triangular mesh first"
+    )
 
     @classmethod
     def description(cls, context, properties):
@@ -211,7 +215,9 @@ class object2surf(bpy.types.Operator):
                     if ("_DataInfo_" in ob) and ("BlenderObjectName" in ob["_DataInfo_"]):
                         objname = ob["_DataInfo_"]["BlenderObjectName"]
                     AddMeshFromNodeFace(
-                        ob["MeshVertex3"], (np.array(ob["MeshTri3"]) - 1).tolist(), objname
+                        ob["MeshVertex3"],
+                        (np.array(ob["MeshTri3"]) - 1).tolist(),
+                        objname,
                     )
                     bpy.context.view_layer.objects.active = bpy.data.objects[objname]
                     idx += 1
@@ -293,7 +299,9 @@ register_class(OBJECT2SURF_OT_invoke_export)
 class OBJECT2SURF_OT_invoke_import(bpy.types.Operator, ImportHelper):
     bl_idname = "object2surf.invoke_import"
     bl_label = "Import Mesh"
-    bl_description = "Import triangular surfaces in .json,.jmsh,.bmsh,.off,.medit,.stl,.smf,.gts"
+    bl_description = (
+        "Import triangular surfaces in .json,.jmsh,.bmsh,.off,.medit,.stl,.smf,.gts"
+    )
 
     # filename_ext: "*.json;*.jmsh;*.bmsh;*.off;*.medit;*.stl;*.smf;*.gts"
     filepath: bpy.props.StringProperty(default="", subtype="DIR_PATH")
@@ -318,7 +326,9 @@ class OBJECT2SURF_OT_invoke_import(bpy.types.Operator, ImportHelper):
         surfdata = oc.feval("surf2jmesh", self.filepath)
 
         AddMeshFromNodeFace(
-            surfdata["MeshVertex3"], (np.array(surfdata["MeshTri3"]) - 1).tolist(), "importedsurf"
+            surfdata["MeshVertex3"],
+            (np.array(surfdata["MeshTri3"]) - 1).tolist(),
+            "importedsurf",
         )
 
         return {"FINISHED"}

@@ -108,7 +108,9 @@ def LoadReginalMesh(meshdata, name):
         bbx["max"] = np.amax(
             np.vstack((bbx["max"], np.amax(meshdata["MeshVertex3"], axis=0))), axis=0
         )
-        AddMeshFromNodeFace(meshdata["MeshVertex3"], meshdata[surfkey].tolist(), name + str(i + 1))
+        AddMeshFromNodeFace(
+            meshdata["MeshVertex3"], meshdata[surfkey].tolist(), name + str(i + 1)
+        )
     print(bbx)
     return bbx
 

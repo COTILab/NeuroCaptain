@@ -47,13 +47,23 @@ class NeuroCaptain_UI(bpy.types.Panel):
         layout.separator()
         layout.label(text="Generate 10-20 Landmarks Mesh", icon="SHADING_SOLID")
         rowbmesh = layout.row()
-        rowbmesh.operator(brain1020mesh.bl_idname, text="NZ", icon="USER").action = "NZ_SELECT"
-        rowbmesh.operator(brain1020mesh.bl_idname, text="LPA", icon="USER").action = "LPA_SELECT"
-        rowbmesh.operator(brain1020mesh.bl_idname, text="RPA", icon="USER").action = "RPA_SELECT"
+        rowbmesh.operator(
+            brain1020mesh.bl_idname, text="NZ", icon="USER"
+        ).action = "NZ_SELECT"
+        rowbmesh.operator(
+            brain1020mesh.bl_idname, text="LPA", icon="USER"
+        ).action = "LPA_SELECT"
+        rowbmesh.operator(
+            brain1020mesh.bl_idname, text="RPA", icon="USER"
+        ).action = "RPA_SELECT"
         rowbmesh2 = layout.row()
-        rowbmesh2.operator(brain1020mesh.bl_idname, text="IZ", icon="USER").action = "IZ_SELECT"
+        rowbmesh2.operator(
+            brain1020mesh.bl_idname, text="IZ", icon="USER"
+        ).action = "IZ_SELECT"
 
-        rowbmesh2.operator(brain1020mesh.bl_idname, text="CZ", icon="USER").action = "CZ_SELECT"
+        rowbmesh2.operator(
+            brain1020mesh.bl_idname, text="CZ", icon="USER"
+        ).action = "CZ_SELECT"
 
         colbmesh = layout.column()
         colbmesh.operator(
@@ -112,4 +122,6 @@ class NeuroCaptain_UI(bpy.types.Panel):
         layout.separator()
         layout.label(text="Cap Circumference Calculator", icon="SHADING_SOLID")
         colcirc = layout.column()
-        colcirc.operator(circumference_calc.bl_idname, text="Cap Circumference", icon="MOD_DECIM")
+        colcirc.operator(
+            circumference_calc.bl_idname, text="Cap Circumference", icon="MOD_DECIM"
+        )

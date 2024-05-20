@@ -2,85 +2,60 @@ import bpy
 from bpy.types import Operator
 from bpy.props import EnumProperty, StringProperty, CollectionProperty
 import bmesh
+from bpy import context
+
+enum_action = [
+    ("REFERENCE_POINT", "reference_point", "select Nz vertice, then press okay"),
+    (
+        "CIRCUMFERENC",
+        "place_cutouts",
+        "place the cutouts in generic locations (can be altered by user)",
+    ),
+]
 
 
 class circumference_calc(Operator):
-    bl_label = "Calculate circumference of cap"
+    bl_label = "Calculate cap circumference"
     bl_idname = "neurocaptain.circumference"
-    bl_description = "Approximate the circumference of the cap model"
+    bl_description = "Estimate the circumference of the cap model"
 
     def execute(self, context):
         try:
             bpy.ops.object.mode_set(mode="OBJECT")
         except:
             pass
-        cap = bpy.context.scene.objects["headmesh"]
         bpy.ops.object.select_all(action="DESELECT")
-        bpy.context.view_layer.objects.active = cap
-        cap.select_set(True)
-        bpy.ops.object.duplicate_move(
-            OBJECT_OT_duplicate={"linked": False, "mode": "TRANSLATION"},
-            TRANSFORM_OT_translate={
-                "value": (0.212906, 0.0140968, 0.0237914),
-                "orient_axis_ortho": "X",
-                "orient_type": "GLOBAL",
-                "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                "orient_matrix_type": "GLOBAL",
-                "constraint_axis": (False, False, False),
-                "mirror": False,
-                "use_proportional_edit": False,
-                "proportional_edit_falloff": "SMOOTH",
-                "proportional_size": 1,
-                "use_proportional_connected": False,
-                "use_proportional_projected": False,
-                "snap": False,
-                "snap_elements": {"INCREMENT"},
-                "use_snap_project": False,
-                "snap_target": "CLOSEST",
-                "use_snap_self": True,
-                "use_snap_edit": True,
-                "use_snap_nonedit": True,
-                "use_snap_selectable": False,
-                "snap_point": (0, 0, 0),
-                "snap_align": False,
-                "snap_normal": (0, 0, 0),
-                "gpencil_strokes": False,
-                "cursor_transform": False,
-                "texture_space": False,
-                "remove_on_cancel": False,
-                "view2d_edge_pan": False,
-                "release_confirm": False,
-                "use_accurate": False,
-                "use_automerge_and_split": False,
-            },
-        )
-        cap_dup = bpy.context.object
-        cap_dup.name = "cap_copy"
+        ob = bpy.data.objects["headmesh.001"]
+        context.view_layer.objects.active = ob
+        ob.hide_set(False)
+        ob.select_set(True)
+
+        bpy.ops.object.duplicate()
+        for obj in bpy.context.selected_objects:
+            obj.name = "headcopy"
+            obj.data.name = "headcopy"
+        # head_dup.name = "headcopy"
         self.reference_point(context=context)
         self.place_cube(context=context)
+        self.boolean_cut(context=context)
+        self.measure(context=context)
         return {"FINISHED"}
 
     @staticmethod
-    def get_lengths():
-        lengths = []
-        ruler_data = bpy.data.grease_pencils["Annotations"].layers["RulerData3D"]
-        frame = ruler_data.frames[0]
-        for stroke in frame.strokes:
-            p1, p2 = stroke.points[0], stroke.points[-1]
-            length = (p1.co - p2.co).length
-            lengths.append(length)
-        return lengths
-
-    @staticmethod
     def reference_point(context):
-        mode = bpy.context.active_object.mode
-        # we need to switch from Edit mode to Object mode so the selection gets updated
-        bpy.ops.object.mode_set(mode="OBJECT")
-        obj = bpy.context.scene.objects["headmesh.001"]
-        bpy.ops.object.select_all(action="DESELECT")
+        # mode = bpy.context.active_object.mode
+        # switch from Edit mode to Object mode so the selection gets updated
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except:
+            pass
+        # bpy.ops.object.select_all(action="DESELECT")
+        obj = bpy.data.objects["headmesh.001"]
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
-        selectedVerts = [v for v in bpy.context.active_object.data.vertices if v.select]
+        # breakpoint()
+        # try:
+        selectedVerts = [v for v in obj.data.vertices if v.select]
         global vselect
         vselect = []
         for n in range(len(selectedVerts)):
@@ -88,65 +63,72 @@ class circumference_calc(Operator):
             v_global = obj.matrix_world @ vert
 
             vselect = v_global
-            print("reference is ", v_global)
+            # print("reference is ", v_global)
 
-        # back to the previous mode
-        bpy.ops.object.mode_set(mode="OBJECT")
-
-        print("selected vertex is:", vselect)
+        # back to theprevious mode
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except:
+            pass
 
         return vselect
 
     @staticmethod
     def place_cube(context):
-        global co0_t, co1_t, l
-        head = bpy.data.objects["headmesh.001"]
-
         bpy.ops.mesh.primitive_cube_add()
         obj2 = bpy.context.selected_objects[0]
-        obj2.name = "capcut"
-
+        obj2.name = "cube_meas"
+        # scale the cube relative to the size of the head mesh
+        head = bpy.data.objects["headmesh.001"]
+        head_dimension = head.dimensions
+        obj2.scale = (head.dimensions[0], head.dimensions[1], head.dimensions[0] / 3)
         # moving the bottom cube
-        obj2.scale = (head.dimensions[0], head.dimensions[1], head.dimensions[0] / 2)
         obj2.location = (
             vselect[0],
-            vselect[1] - (head.dimensions[1] / 3),
-            vselect[2] - (head.dimensions[2] / 3.5),
+            vselect[1],
+            vselect[2],
         )
-        zhead = head.dimensions[0]
-        print("the zheaddimension is:", zhead)
+        # rotate the bottom cut 2 degrees - preserve more landmarks
+        # bpy.context.object.rotation_euler[0] = 0.0523599
 
-        capcopy = bpy.data.objects["cap_copy"]
+        pass
+
+    @staticmethod
+    def boolean_cut(context):
+        head = bpy.data.objects["headcopy"]
+        cube = bpy.data.objects["cube_meas"]
+
+        # make the bottom cut, switch to edit mode and delete faces created by the operation
         bpy.ops.object.mode_set(mode="OBJECT")
-        bool_one = capcopy.modifiers.new(type="BOOLEAN", name="bool 1")
-        bool_one.object = obj2
-        bool_one.operation = "DIFFERENCE"
-        bool_one.solver = "FAST"
-        # face.hide_set(True)
-        bpy.context.view_layer.objects.active = capcopy
-        bpy.ops.object.modifier_apply(modifier="bool 1")
-        print("face boolean complete")
+        bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
+        bool_two.object = cube
+        bool_two.operation = "DIFFERENCE"
+        bool_two.solver = "FAST"
+        cube.hide_set(True)
+        bpy.context.view_layer.objects.active = head
+        bpy.ops.object.modifier_apply(modifier="bool 2")
+        print("cube boolean complete")
+        # make the face cut, switch to edit mode and delete faces created by the operation
 
-        bpy.data.objects["capcut"].select_set(True)
-        bpy.ops.object.delete()
+    @staticmethod
+    def measure(context):
+        bpy.ops.object.mode_set(mode="EDIT")
+        me = bpy.context.active_object.data
+        bm = bmesh.from_edit_mesh(me)
+        bm.verts.ensure_lookup_table()
+        bpy.ops.mesh.select_all(action="DESELECT")
+        top_verts = [bm.verts[0]]
+        for v in bm.verts:
+            if v.co.z < top_verts[0].co.z:
+                top_verts = [v]
 
-        bpy.context.view_layer.objects.active = capcopy
-
-        capcopy = bpy.context.scene.objects["cap_copy"]
-        bpy.ops.object.select_all(action="DESELECT")
-        bpy.context.view_layer.objects.active = capcopy
-        capcopy.select_set(True)
-
-        try:
-            bpy.ops.object.mode_set(mode="EDIT")
-        except:
-            pass
-
-        bpy.ops.mesh.edge_face_add()
+        for v in top_verts:
+            for f in v.link_faces:
+                f.select_set(True)
         bpy.ops.mesh.duplicate_move(
             MESH_OT_duplicate={"mode": 1},
             TRANSFORM_OT_translate={
-                "value": (116.693, -12.1011, 83.9973),
+                "value": (86.631, 151.812, 21.379),
                 "orient_axis_ortho": "X",
                 "orient_type": "GLOBAL",
                 "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
@@ -179,45 +161,28 @@ class circumference_calc(Operator):
                 "use_automerge_and_split": False,
             },
         )
-        bpy.ops.mesh.separate(type="SELECTED")
 
-        bpy.ops.object.mode_set(mode="OBJECT")
-        capcopy2 = bpy.data.objects["cap_copy.001"]
-        bpy.ops.object.select_all(action="DESELECT")
-        bpy.context.view_layer.objects.active = capcopy2
-        capcopy2.select_set(True)
-
-        try:
-            bpy.ops.object.mode_set(mode="EDIT")
-        except:
-            pass
-        bpy.ops.mesh.select_all(action="SELECT")
-
-        merge_distance = zhead / 9
-        bpy.ops.mesh.remove_doubles(threshold=merge_distance)
-
-        capcopy2.select_set(True)
-
-        me = bpy.context.object.data
         bm = bmesh.from_edit_mesh(me)
-        object = bpy.context.active_object
-        mesh = object.data
-        # list to populate with lengths
         edge_lengths = []
         # if edge is selected, get its length
         for e in bm.edges:
-            edge_lengths.append(e.calc_length())
-        circ = sum(edge_lengths) / 1000
+            if e.select:
+                edge_lengths.append(e.calc_length())
+        # print(edge_lengths)
+        circ = sum(edge_lengths)
         circ = round(circ, 3)
-        print("The Circumfrence is: ", circ, "meters")  # default unit in blender is meters
+        unit = bpy.context.scene.unit_settings.length_unit
+        print("The Circumfrence is: ", circ, unit)  # default unit in blender is meter
+        print("NOTE: the units are defined in blender scene properties")
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except:
+            pass
+        head = bpy.data.objects["headcopy"]
+        cube = bpy.data.objects["cube_meas"]
+        cube.select_set(True)
+        bpy.ops.object.delete()
+        head.select_set(True)
+        bpy.ops.object.delete()
 
-        bpy.ops.object.mode_set(mode="OBJECT")
-        bpy.ops.object.select_all(action="DESELECT")
-
-        bpy.data.objects["cap_copy"].select_set(True)
-
-        # bpy.ops.object.delete()
-
-        capcopy2.name = "CIR_face"
-
-        pass
+        return {"FINISHED"}

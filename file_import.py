@@ -55,7 +55,7 @@ class file_import(Operator, ImportHelper):
         return {"FINISHED"}
 
     def execute(self, context):
-        print(self.files)
+        # print(self.files)
 
         self.func(context)
         # Get the folder
@@ -81,53 +81,13 @@ class file_import(Operator, ImportHelper):
             )
             # Append Object(s) to the list
             obs.append(context.selected_objects[:])
-            # rotation correctio to oreient head model so apex of head (+z)
-            bpy.context.object.rotation_euler[0] = 4.71239
-            bpy.ops.object.origin_set(type="GEOMETRY_ORIGIN", center="MEDIAN")
+            bpy.context.object.rotation_euler[
+                0
+            ] = 4.71239  ## I needed this line idk if eveyone will
+            # bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
             obj = bpy.context.object
-            # rename object, consistent with future operations
-            obj.name = "headmesh"
-            bpy.ops.object.duplicate_move(
-                OBJECT_OT_duplicate={"linked": False, "mode": "TRANSLATION"},
-                TRANSFORM_OT_translate={
-                    "value": (0.212906, 0.0140968, 0.0237914),
-                    "orient_axis_ortho": "X",
-                    "orient_type": "GLOBAL",
-                    "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                    "orient_matrix_type": "GLOBAL",
-                    "constraint_axis": (False, False, False),
-                    "mirror": False,
-                    "use_proportional_edit": False,
-                    "proportional_edit_falloff": "SMOOTH",
-                    "proportional_size": 1,
-                    "use_proportional_connected": False,
-                    "use_proportional_projected": False,
-                    "snap": False,
-                    "snap_elements": {"INCREMENT"},
-                    "use_snap_project": False,
-                    "snap_target": "CLOSEST",
-                    "use_snap_self": True,
-                    "use_snap_edit": True,
-                    "use_snap_nonedit": True,
-                    "use_snap_selectable": False,
-                    "snap_point": (0, 0, 0),
-                    "snap_align": False,
-                    "snap_normal": (0, 0, 0),
-                    "gpencil_strokes": False,
-                    "cursor_transform": False,
-                    "texture_space": False,
-                    "remove_on_cancel": False,
-                    "view2d_edge_pan": False,
-                    "release_confirm": False,
-                    "use_accurate": False,
-                    "use_automerge_and_split": False,
-                },
-            )
-            obj_dup = bpy.context.object
-            obj_dup.hide_set(True)
-            obj_dup.name = "headmesh_copy"
-            # Print the imported object reference
-            print("Imported object:", context.object)
+            obj.name = "importedmodel"
+
         else:
             try:
                 if bpy.context.scene.blender_photonics.backend == "octave":
@@ -144,12 +104,25 @@ class file_import(Operator, ImportHelper):
                 )
 
             oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"))
-            # extract surface mesh
-            surfdata = oc.feval("surf2jmesh", self.filepath)
-            AddMeshFromNodeFace(
-                surfdata["MeshVertex3"],
-                (np.array(surfdata["MeshTri3"]) - 1).tolist(),
-                "importedmodel",
-            )
+            # load json
+            try:
+                surfdata = oc.feval("loadjson", self.filepath)
+                AddMeshFromNodeFace(
+                    surfdata["MeshVertex3"],
+                    (np.array(surfdata["MeshTri3"]) - 1).astype(np.int32).tolist(),
+                    "importedmodel",
+                )
+            # load bmsh
+            except:
+                surfdata = oc.feval("surf2jmesh", self.filepath)
+                print("data is", surfdata)
+                AddMeshFromNodeFace(
+                    surfdata["MeshVertex3"],
+                    (np.array(surfdata["MeshTri3"]) - 1).astype(np.int16).tolist(),
+                    "importedmodel",
+                )
 
+            print(
+                "please rename object in blender to indicate either 'headmesh' or 'LandmarkMesh"
+            )
         return {"FINISHED"}

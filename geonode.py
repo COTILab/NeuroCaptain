@@ -12,9 +12,7 @@ class geo_nodes(Operator):
 
     bl_idname = "braincapgen.geo_nodes"
     bl_label = "Project 10-20 Landmarks"
-    bl_description = (
-        "Takes the LandmarkMesh and make cut outs at those locations on the head surface mesh"
-    )
+    bl_description = "Takes the LandmarkMesh and make cut outs at those locations on the head surface mesh"
     bl_options = {"PRESET", "UNDO"}
     bl_space_type = "VIEW_3D"
     size_x: bpy.props.FloatProperty(name="cutout_x", default=3)
@@ -125,7 +123,9 @@ class geo_nodes(Operator):
         object_info_brain, node_x_location = self.create_node(
             node_tree, "GeometryNodeObjectInfo", 150, 300, self
         )
-        object_info_brain.inputs["Object"].default_value = bpy.data.objects["LandmarkMesh"]
+        object_info_brain.inputs["Object"].default_value = bpy.data.objects[
+            "LandmarkMesh"
+        ]
         object_info_brain.transform_space = "RELATIVE"
 
         # cutout
@@ -210,7 +210,9 @@ class geo_nodes(Operator):
         node_tree.links.new(
             object_info_brain.outputs["Geometry"], transform_node.inputs["Geometry"]
         )
-        node_tree.links.new(in_node.outputs["Geometry"], sample_nearest_surface.inputs["Mesh"])
+        node_tree.links.new(
+            in_node.outputs["Geometry"], sample_nearest_surface.inputs["Mesh"]
+        )
         node_tree.links.new(
             align_euler_vector.outputs["Rotation"],
             instance_on_points.inputs["Rotation"],
@@ -233,17 +235,21 @@ class geo_nodes(Operator):
 
         self.update_geo_node_tree(node_tree, self)
 
-        node_tree.links.new(normal_node.outputs["Normal"], sample_nearest_surface.inputs[3])
-        node_tree.links.new(sample_nearest_surface.outputs[2], align_euler_vector.inputs["Vector"])
+        node_tree.links.new(
+            normal_node.outputs["Normal"], sample_nearest_surface.inputs[3]
+        )
+        node_tree.links.new(
+            sample_nearest_surface.outputs[2], align_euler_vector.inputs["Vector"]
+        )
         cuthide = bpy.data.objects["cutout"]
         cuthide.hide_set(True)
         brainhide = bpy.data.objects["LandmarkMesh"]
         brainhide.hide_set(True)
         # apply geoemtry nodes- comment out following line to modify ###
-        bpy.ops.object.modifier_apply(modifier="GeometryNodes")
-        bpy.ops.object.editmode_toggle()
-        bpy.ops.mesh.delete(type="FACE")
-        bpy.ops.object.editmode_toggle()
+        # bpy.ops.object.modifier_apply(modifier="GeometryNodes")
+        # bpy.ops.object.editmode_toggle()
+        # bpy.ops.mesh.delete(type="FACE")
+        # bpy.ops.object.editmode_toggle()
         ###
         bpy.context.view_layer.objects.active = head
 

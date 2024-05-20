@@ -92,7 +92,7 @@ class cap_generation(Operator):
         bev = obj.modifiers.new(name="bevel", type="BEVEL")
         bev.width = 0.6
         bev.segments = 30
-        bpy.ops.object.modifier_apply(modifier="bev")
+        bpy.ops.object.modifier_apply(modifier="bevel")
         obj.name = "face_cutout"
 
         # scale cube relative to the size of the head mesh
@@ -129,18 +129,6 @@ class cap_generation(Operator):
         face = bpy.data.objects["face_cutout"]
         bottom = bpy.data.objects["bottom_cutout"]
 
-        # make the face cut, switch to edit mode and delete faces created by the operation
-        bpy.ops.object.mode_set(mode="OBJECT")
-        bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")
-        bool_one.object = face
-        bool_one.operation = "DIFFERENCE"
-        bool_one.solver = "FAST"
-        face.hide_set(True)
-        bpy.context.view_layer.objects.active = head
-        bpy.ops.object.modifier_apply(modifier="bool 1")
-        print("face boolean complete")
-        bpy.context.view_layer.objects.active = head
-
         # make the bottom cut, switch to edit mode and delete faces created by the operation
         bpy.ops.object.mode_set(mode="OBJECT")
         bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
@@ -151,6 +139,20 @@ class cap_generation(Operator):
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 2")
         print("bottom boolean complete")
+        # make the face cut, switch to edit mode and delete faces created by the operation
+        bpy.ops.object.editmode_toggle()
+        bpy.ops.mesh.delete(type="FACE")
+
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")
+        bool_one.object = face
+        bool_one.operation = "DIFFERENCE"
+        bool_one.solver = "EXACT"
+        face.hide_set(True)
+        bpy.context.view_layer.objects.active = head
+        bpy.ops.object.modifier_apply(modifier="bool 1")
+        print("face boolean complete")
+        bpy.context.view_layer.objects.active = head
 
         # generate a wireframe mesh from cap design
         head = bpy.data.objects["headmesh"]

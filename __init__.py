@@ -7,7 +7,7 @@ from .decimate_mesh import decimate_mesh
 from .shapes import insert_shape
 from .headmodels import select_model
 from .geonode import geo_nodes
-from .dual_mesh import dual_mesh
+from .dual_mesh_nc import dual_mesh_NC
 from .niifile import niifile
 from .capgen import cap_generation
 from .circumference import circumference_calc
@@ -36,7 +36,7 @@ def register():
     bpy.utils.register_class(brain1020mesh)
     bpy.utils.register_class(select_model)
     bpy.utils.register_class(geo_nodes)
-    bpy.utils.register_class(dual_mesh)
+    bpy.utils.register_class(dual_mesh_NC)
     bpy.utils.register_class(cap_generation)
     bpy.utils.register_class(circumference_calc)
     bpy.types.Scene.neurocaptain = PointerProperty(type=niifile)

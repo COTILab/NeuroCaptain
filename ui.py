@@ -5,7 +5,7 @@ from .decimate_mesh import decimate_mesh
 from .shapes import insert_shape
 from .headmodels import select_model
 from .geonode import geo_nodes
-from .dual_mesh import dual_mesh
+from .dual_mesh_nc import dual_mesh_NC
 from .capgen import cap_generation
 from .circumference import circumference_calc
 
@@ -80,7 +80,7 @@ class NeuroCaptain_UI(bpy.types.Panel):
         layout.separator()
         layout.label(text="Convert to Dual Mesh", icon="SHADING_SOLID")
         coldual = layout.column()
-        coldual.operator(dual_mesh.bl_idname, icon="SEQ_CHROMA_SCOPE")
+        coldual.operator(dual_mesh_NC.bl_idname, icon="SEQ_CHROMA_SCOPE")
 
         layout.separator()
         layout.label(text="Choose Cutout Shape", icon="SHADING_SOLID")

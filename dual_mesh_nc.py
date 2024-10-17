@@ -20,5 +20,13 @@ class dual_mesh_NC(Operator):
             bpy.ops.object.dual_mesh_tessellated()
         except AttributeError:
             print("MESH:TISSUE ADDON NOT INSTALLED")
+        head = bpy.data.objects["headmesh"]
+        head.name = "old copy"
+        dual = bpy.data.objects["DualMesh"]
+        bpy.ops.object.select_all(action="DESELECT")
+        head.select_set(True)
+        bpy.ops.object.delete()
+        dual.select_set(True)
+        dual.name = "headmesh"
 
         return {"FINISHED"}

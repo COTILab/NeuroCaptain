@@ -122,7 +122,5 @@ class file_import(Operator, ImportHelper):
                     "importedmodel",
                 )
 
-            print(
-                "please rename object in blender to indicate either 'headmesh' or 'LandmarkMesh"
-            )
+            print("please rename object in blender to indicate either 'headmesh' or 'LandmarkMesh")
         return {"FINISHED"}

@@ -4,6 +4,7 @@ from bpy.types import Operator, PropertyGroup, NodeLink
 import bpy
 from bpy.types import Operator, PropertyGroup, GeometryNode, FunctionNode, bpy_struct
 from bpy import context
+import bmesh
 
 
 class geo_nodes(Operator):
@@ -12,7 +13,9 @@ class geo_nodes(Operator):
 
     bl_idname = "braincapgen.geo_nodes"
     bl_label = "Project 10-20 Landmarks"
-    bl_description = "Takes the LandmarkMesh and make cut outs at those locations on the head surface mesh"
+    bl_description = (
+        "Takes the LandmarkMesh and make cut outs at those locations on the head surface mesh"
+    )
     bl_options = {"PRESET", "UNDO"}
     bl_space_type = "VIEW_3D"
     size_x: bpy.props.FloatProperty(name="cutout_x", default=3)
@@ -123,9 +126,7 @@ class geo_nodes(Operator):
         object_info_brain, node_x_location = self.create_node(
             node_tree, "GeometryNodeObjectInfo", 150, 300, self
         )
-        object_info_brain.inputs["Object"].default_value = bpy.data.objects[
-            "LandmarkMesh"
-        ]
+        object_info_brain.inputs["Object"].default_value = bpy.data.objects["LandmarkMesh"]
         object_info_brain.transform_space = "RELATIVE"
 
         # cutout
@@ -210,9 +211,7 @@ class geo_nodes(Operator):
         node_tree.links.new(
             object_info_brain.outputs["Geometry"], transform_node.inputs["Geometry"]
         )
-        node_tree.links.new(
-            in_node.outputs["Geometry"], sample_nearest_surface.inputs["Mesh"]
-        )
+        node_tree.links.new(in_node.outputs["Geometry"], sample_nearest_surface.inputs["Mesh"])
         node_tree.links.new(
             align_euler_vector.outputs["Rotation"],
             instance_on_points.inputs["Rotation"],
@@ -221,7 +220,17 @@ class geo_nodes(Operator):
         node_tree.links.new(mesh_boolean.outputs["Mesh"], out_node.inputs["Geometry"])
 
     def execute(self, context):
+        obj = bpy.context.object
+        # ensure the head model is a surface mesh before making the landmark cuts
+        bpy.ops.object.mode_set(mode="EDIT")
+        bm = bmesh.from_edit_mesh(obj.data)
+        bpy.ops.mesh.select_all(action="DESELECT")
+        bpy.ops.mesh.select_non_manifold()
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.select], context="FACES")
+        bmesh.update_edit_mesh(obj.data)
         bpy.ops.object.mode_set(mode="OBJECT")
+
+        # Apply Geometry Nodes
         bpy.data.objects["headmesh"].select_set(True)
         head = bpy.data.objects["headmesh"]
 
@@ -235,22 +244,14 @@ class geo_nodes(Operator):
 
         self.update_geo_node_tree(node_tree, self)
 
-        node_tree.links.new(
-            normal_node.outputs["Normal"], sample_nearest_surface.inputs[3]
-        )
-        node_tree.links.new(
-            sample_nearest_surface.outputs[2], align_euler_vector.inputs["Vector"]
-        )
+        node_tree.links.new(normal_node.outputs["Normal"], sample_nearest_surface.inputs[3])
+        node_tree.links.new(sample_nearest_surface.outputs[2], align_euler_vector.inputs["Vector"])
         cuthide = bpy.data.objects["cutout"]
         cuthide.hide_set(True)
         brainhide = bpy.data.objects["LandmarkMesh"]
         brainhide.hide_set(True)
-        # apply geoemtry nodes- comment out following line to modify ###
+        # apply geoemtry nodes automaticcal- remove # from following line to modify
         # bpy.ops.object.modifier_apply(modifier="GeometryNodes")
-        # bpy.ops.object.editmode_toggle()
-        # bpy.ops.mesh.delete(type="FACE")
-        # bpy.ops.object.editmode_toggle()
-        ###
         bpy.context.view_layer.objects.active = head
 
         return {"FINISHED"}

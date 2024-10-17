@@ -43,18 +43,15 @@ class circumference_calc(Operator):
 
     @staticmethod
     def reference_point(context):
-        # mode = bpy.context.active_object.mode
         # switch from Edit mode to Object mode so the selection gets updated
         try:
             bpy.ops.object.mode_set(mode="OBJECT")
         except:
             pass
-        # bpy.ops.object.select_all(action="DESELECT")
         obj = bpy.data.objects["headmesh.001"]
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
-        # breakpoint()
-        # try:
+
         selectedVerts = [v for v in obj.data.vertices if v.select]
         global vselect
         vselect = []
@@ -63,7 +60,6 @@ class circumference_calc(Operator):
             v_global = obj.matrix_world @ vert
 
             vselect = v_global
-            # print("reference is ", v_global)
 
         # back to theprevious mode
         try:
@@ -88,8 +84,6 @@ class circumference_calc(Operator):
             vselect[1],
             vselect[2],
         )
-        # rotate the bottom cut 2 degrees - preserve more landmarks
-        # bpy.context.object.rotation_euler[0] = 0.0523599
 
         pass
 
@@ -132,33 +126,6 @@ class circumference_calc(Operator):
                 "orient_axis_ortho": "X",
                 "orient_type": "GLOBAL",
                 "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                "orient_matrix_type": "GLOBAL",
-                "constraint_axis": (False, False, False),
-                "mirror": False,
-                "use_proportional_edit": False,
-                "proportional_edit_falloff": "SMOOTH",
-                "proportional_size": 1,
-                "use_proportional_connected": False,
-                "use_proportional_projected": False,
-                "snap": False,
-                "snap_elements": {"INCREMENT"},
-                "use_snap_project": False,
-                "snap_target": "CLOSEST",
-                "use_snap_self": True,
-                "use_snap_edit": True,
-                "use_snap_nonedit": True,
-                "use_snap_selectable": False,
-                "snap_point": (0, 0, 0),
-                "snap_align": False,
-                "snap_normal": (0, 0, 0),
-                "gpencil_strokes": False,
-                "cursor_transform": False,
-                "texture_space": False,
-                "remove_on_cancel": False,
-                "view2d_edge_pan": False,
-                "release_confirm": False,
-                "use_accurate": False,
-                "use_automerge_and_split": False,
             },
         )
 

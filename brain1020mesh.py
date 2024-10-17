@@ -87,9 +87,7 @@ class brain1020mesh(Operator):
         bpy.ops.object.mode_set(mode="OBJECT")
         obj = bpy.context.view_layer.objects.active
         bpy.ops.object.mode_set(mode="OBJECT")
-        selectedverts_nz = [
-            v for v in bpy.context.active_object.data.vertices if v.select
-        ]
+        selectedverts_nz = [v for v in bpy.context.active_object.data.vertices if v.select]
 
         vselect_nz = []
         # formats the global coordinates [x,y,z]
@@ -108,9 +106,7 @@ class brain1020mesh(Operator):
         bpy.ops.object.mode_set(mode="OBJECT")
         obj = bpy.context.view_layer.objects.active
         bpy.ops.object.mode_set(mode="OBJECT")
-        selectedverts_lpa = [
-            v for v in bpy.context.active_object.data.vertices if v.select
-        ]
+        selectedverts_lpa = [v for v in bpy.context.active_object.data.vertices if v.select]
 
         vselect_lpa = []
         # formats the global coordinates [x,y,z]
@@ -129,9 +125,7 @@ class brain1020mesh(Operator):
         bpy.ops.object.mode_set(mode="OBJECT")
         obj = bpy.context.view_layer.objects.active
         bpy.ops.object.mode_set(mode="OBJECT")
-        selectedverts_rpa = [
-            v for v in bpy.context.active_object.data.vertices if v.select
-        ]
+        selectedverts_rpa = [v for v in bpy.context.active_object.data.vertices if v.select]
 
         vselect_rpa = []
         # formats the global coordinates [x,y,z]
@@ -150,9 +144,7 @@ class brain1020mesh(Operator):
         bpy.ops.object.mode_set(mode="OBJECT")
         obj = bpy.context.view_layer.objects.active
         bpy.ops.object.mode_set(mode="OBJECT")
-        selectedverts_iz = [
-            v for v in bpy.context.active_object.data.vertices if v.select
-        ]
+        selectedverts_iz = [v for v in bpy.context.active_object.data.vertices if v.select]
 
         vselect_iz = []
         # formats the global coordinates [x,y,z]
@@ -171,9 +163,7 @@ class brain1020mesh(Operator):
         bpy.ops.object.mode_set(mode="OBJECT")
         obj = bpy.context.view_layer.objects.active
         bpy.ops.object.mode_set(mode="OBJECT")
-        selectedverts_cz = [
-            v for v in bpy.context.active_object.data.vertices if v.select
-        ]
+        selectedverts_cz = [v for v in bpy.context.active_object.data.vertices if v.select]
 
         vselect_cz = []
         # formats the global coordinates [x,y,z]
@@ -228,6 +218,7 @@ class brain1020mesh(Operator):
             raise ImportError(
                 "To run this feature, you must install the `oct2py` or `matlab.engine` Python module first, based on your choice of the backend"
             )
+        print(os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"))
         oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"))
         # runs brain1020mesh.m in backend
         oc.feval("brain1020mesh", os.path.join(outputdir, "brain1020input.jmsh"))

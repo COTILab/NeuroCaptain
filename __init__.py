@@ -11,6 +11,7 @@ from .dual_mesh_nc import dual_mesh_NC
 from .niifile import niifile
 from .capgen import cap_generation
 from .circumference import circumference_calc
+from .exportmesh import exportmesh
 
 bl_info = {
     "name": "NeuroCaptain",
@@ -39,6 +40,7 @@ def register():
     bpy.utils.register_class(dual_mesh_NC)
     bpy.utils.register_class(cap_generation)
     bpy.utils.register_class(circumference_calc)
+    bpy.utils.register_class(exportmesh)
     bpy.types.Scene.neurocaptain = PointerProperty(type=niifile)
 
 

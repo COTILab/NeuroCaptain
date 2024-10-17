@@ -147,7 +147,7 @@ class cap_generation(Operator):
         bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")
         bool_one.object = face
         bool_one.operation = "DIFFERENCE"
-        bool_one.solver = "EXACT"
+        bool_one.solver = "FAST"
         face.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 1")

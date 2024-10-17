@@ -41,15 +41,18 @@ def GetNodeFacefromObject(obj, istrimesh=True):
     # edges = [edge.vertices[:] for edge in obj.data.edges]
     faces = [(np.array(face.vertices[:]) + 1).tolist() for face in obj.data.polygons]
     v = np.array(verts)
+    print(v)
     try:
         f = np.array(faces)
+        print(f)
         return {"MeshVertex3": v, "MeshTri3": f}
     except:
         f = faces
+        print(f)
     return {
         "_DataInfo_": {"BlenderObjectName", obj.name},
         "MeshVertex3": v,
-        "MeshPoly": f,
+        "MeshTri3": f,
     }
 
 
@@ -77,13 +80,13 @@ def GetBPWorkFolder():
         return os.path.join(
             tempfile.gettempdir(),
             "iso2mesh-" + os.environ.get("UserName"),
-            "blenderphotonics",
+            "neurocaptain",
         )
     else:
         return os.path.join(
             tempfile.gettempdir(),
             "iso2mesh-" + os.environ.get("USER"),
-            "blenderphotonics",
+            "neurocaptain",
         )
 
 
@@ -108,9 +111,7 @@ def LoadReginalMesh(meshdata, name):
         bbx["max"] = np.amax(
             np.vstack((bbx["max"], np.amax(meshdata["MeshVertex3"], axis=0))), axis=0
         )
-        AddMeshFromNodeFace(
-            meshdata["MeshVertex3"], meshdata[surfkey].tolist(), name + str(i + 1)
-        )
+        AddMeshFromNodeFace(meshdata["MeshVertex3"], meshdata[surfkey].tolist(), name + str(i + 1))
     print(bbx)
     return bbx
 

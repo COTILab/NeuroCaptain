@@ -1,4 +1,4 @@
-function tempname=bpmwpath(fname)
+function tempname=ncmwpath(fname)
 %
 % tempname=bpmwpath(fname)
 %
@@ -31,6 +31,8 @@ function tempname=bpmwpath(fname)
 %
 % -- this function is part of BlenderPhotonics (http://mcx.space/bp)
 %
+
+%%this function was modified from bpmwapth for NeuroCaptain 
 
 if (nargin < 1) || isempty(fname)
     fname = '';

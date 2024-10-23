@@ -129,5 +129,3 @@ def JMeshFallback(meshobj):
     if ("MeshNode" in meshobj) and (not ("MeshVertex3" in meshobj)):
         meshobj["MeshVertex3"] = meshobj.pop("MeshNode")
     return meshobj
-
-

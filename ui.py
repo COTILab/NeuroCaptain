@@ -29,18 +29,6 @@ class NeuroCaptain_UI(bpy.types.Panel):
         rowengine = layout.row()
         rowengine.label(text="Backend:")
         rowengine.prop(bp, "backend", expand=True)
-        
-        layout.separator()
-        layout.label(text="Import Head Model", icon='SHADING_SOLID')
-        cols2m = layout.column()
-        cols2m.operator(file_import.bl_idname,icon='IMPORT')
-        
-        layout.separator()
-        layout.label(text = "Choose from Predefined Head Atlases", icon = 'SHADING_SOLID')
-        rowmod = layout.row()
-        rowmod.operator(select_model.bl_idname,text='Headmesh',icon='USER').action='ADD_HEADMESH'
-        rowmod.operator(select_model.bl_idname,text='Brain1020Mesh', icon='OUTLINER_DATA_VOLUME').action='ADD_BRAIN1020MESH'
-
 
         layout.separator()
         layout.label(text="Import Head Model", icon="SHADING_SOLID")

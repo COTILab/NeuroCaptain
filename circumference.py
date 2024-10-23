@@ -139,7 +139,7 @@ class circumference_calc(Operator):
         circ = sum(edge_lengths)
         circ = round(circ, 3)
         unit = bpy.context.scene.unit_settings.length_unit
-        print("The Circumfrence is: ", circ, unit)  # default unit in blender is meter
+        print("The estimated circumfrence is: ", circ, unit)  # default unit in blender is meter
         print("NOTE: the units are defined in blender scene properties")
         try:
             bpy.ops.object.mode_set(mode="OBJECT")

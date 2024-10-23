@@ -52,6 +52,8 @@ class brain1020mesh(Operator):
     def execute(self, context):
         outputdir = GetBPWorkFolder()
         print("output directory is:", outputdir)
+        if not os.path.isdir(outputdir):
+            os.makedirs(outputdir)
         obj = bpy.context.view_layer.objects.active
         bpy.ops.object.mode_set(mode="OBJECT")
 

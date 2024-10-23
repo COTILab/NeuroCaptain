@@ -52,11 +52,13 @@ class insert_shape(Operator):
         bpy.ops.mesh.primitive_cylinder_add()
         obj = bpy.context.selected_objects[0]
         obj.name = "cutout"
+
     @staticmethod
     def add_cube(context):
         bpy.ops.mesh.primitive_cube_add()
         obj = bpy.context.selected_objects[0]
         obj.name = "cutout"
+
     @staticmethod
     def add_triangle(context):
         bpy.ops.mesh.primitive_cylinder_add(vertices=3)

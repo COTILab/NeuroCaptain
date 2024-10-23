@@ -23,6 +23,8 @@ class exportmesh(bpy.types.Operator):
 
     def execute(self, context):
         outputdir = GetBPWorkFolder()
+        if not os.path.isdir(outputdir):
+            os.makedirs(outputdir)
         print("the saved mesh directory is:", outputdir)
         obj = bpy.context.view_layer.objects.active
 

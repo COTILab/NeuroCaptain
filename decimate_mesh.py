@@ -9,13 +9,27 @@ class decimate_mesh(bpy.types.Operator):
     number: bpy.props.FloatProperty(name="Decimate Ratio", default=1)
 
     def execute(self, context):
+        try:
+            bpy.ops.object.mode_set(mode="OBJECT")
+        except:
+            pass
         # decrease number of faces
+        bpy.ops.object.select_all(action="DESELECT")
+        head = bpy.data.objects["headmesh"]
+        # bpy.ops.object.select_all(action="DESELECT")
+        head.select_set(True)
+        bpy.context.view_layer.objects.active = head
         obj = bpy.context.object
         mod = obj.modifiers.new(name="decimate", type="DECIMATE")
         mod.decimate_type = "COLLAPSE"
         # user defined decimate ratio of faces to keep
         mod.ratio = self.number
-        bpy.ops.object.modifier_apply(modifier="mod")
+
+        head = bpy.data.objects["headmesh"]
+        # bpy.ops.object.select_all(action="DESELECT")
+        head.select_set(True)
+        bpy.ops.object.modifier_apply(modifier="decimate")
+
         return {"FINISHED"}
 
     def invoke(self, context, event):

@@ -229,12 +229,25 @@ class geo_nodes(Operator):
         bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.select], context="FACES")
         bmesh.update_edit_mesh(obj.data)
         bpy.ops.object.mode_set(mode="OBJECT")
+        
 
         # Apply Geometry Nodes
         bpy.data.objects["headmesh"].select_set(True)
-        head = bpy.data.objects["headmesh"]
+        #head = bpy.data.objects["headmesh"]
 
         head = bpy.context.scene.objects["headmesh"]
+        bpy.context.view_layer.objects.active = head
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        # Make normals consistent and inward-facing
+        bpy.ops.mesh.normals_make_consistent(inside=True)
+
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        bpy.context.view_layer.objects.active = head
+        head.select_set(True)
+
         bpy.ops.object.select_all(action="DESELECT")
         bpy.context.view_layer.objects.active = head
         head.select_set(True)

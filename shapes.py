@@ -67,8 +67,11 @@ class insert_shape(Operator):
 
     @staticmethod
     def add_custom(context):
-        obj = bpy.context.selected_objects[0]
-        obj.name = "cutout"
+        if bpy.context.selected_objects:
+            obj = bpy.context.selected_objects[0]
+            obj.name = "cutout"
+        else:
+            print("Please select a mesh object corresponding to the desired cutout geometry.")
 
 
 def register():

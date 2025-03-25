@@ -76,6 +76,8 @@ class select_model(Operator, ImportHelper):
             folder = os.path.dirname(self.filepath)
             path_to_file = os.path.join(folder, i.name)
             print("folder is", folder)
+            filename = os.path.basename(path_to_file)
+            print("Filename is", filename)
             root_ext = os.path.splitext(path_to_file)
             file_ex = root_ext[1]
             print("file ext is ", file_ex)

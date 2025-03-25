@@ -9,6 +9,7 @@ from .dual_mesh_nc import dual_mesh_NC
 from .capgen import cap_generation
 from .circumference import circumference_calc
 from .exportmesh import exportmesh  # type: ignore
+from .customLandmarks import customLandmarks
 
 
 class NeuroCaptain_UI(bpy.types.Panel):
@@ -53,7 +54,6 @@ class NeuroCaptain_UI(bpy.types.Panel):
         rowbmesh.operator(brain1020mesh.bl_idname, text="RPA", icon="USER").action = "RPA_SELECT"
         rowbmesh2 = layout.row()
         rowbmesh2.operator(brain1020mesh.bl_idname, text="IZ", icon="USER").action = "IZ_SELECT"
-
         rowbmesh2.operator(brain1020mesh.bl_idname, text="CZ", icon="USER").action = "CZ_SELECT"
 
         colbmesh = layout.column()
@@ -62,6 +62,15 @@ class NeuroCaptain_UI(bpy.types.Panel):
             text="10-20 Mesh Generation",
             icon="OUTLINER_OB_POINTCLOUD",
         ).action = "BRAIN1020_MESH"
+        layout.separator()
+        layout.label(text="Define Custom Landmark Geometry", icon="SHADING_SOLID")
+        rowbmesh3 = layout.row()
+        rowbmesh3.operator(
+            customLandmarks.bl_idname, text="Generate Custom", icon="USER"
+        ).action = "CUSTOM_GENERATE"
+        rowbmesh3.operator(
+            customLandmarks.bl_idname, text="Label Custom", icon="USER"
+        ).action = "CUSTOM_MESH"
 
         layout.separator()
         layout.label(text="Alter the Density of the Headmesh", icon="SHADING_SOLID")

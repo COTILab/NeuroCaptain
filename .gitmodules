@@ -1,0 +1,6 @@
+[submodule "script/iso2mesh"]
+	path = script/iso2mesh
+	url = https://github.com/fangq/iso2mesh.git
+[submodule "script/brain2mesh"]
+	path = script/brain2mesh
+	url = https://github.com/fangq/brain2mesh.git

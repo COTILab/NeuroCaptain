@@ -17,10 +17,10 @@ class file_import(Operator, ImportHelper):
     bl_options = {"PRESET", "UNDO"}
 
     # ImportHelperclass uses this
-    filename_ext = ".json,.jmsh,.bmsh,.stl, .off"
+    filename_ext = ".json,.jmsh,.bmsh,.stl, .off,.obj"
 
     filter_glob: StringProperty(
-        default="*.json;*.jmsh;*.bmsh;*.stl;*.off",
+        default="*.json;*.jmsh;*.bmsh;*.stl;*.off;*.obj",
         options={"HIDDEN"},
     )
 
@@ -55,10 +55,8 @@ class file_import(Operator, ImportHelper):
         return {"FINISHED"}
 
     def execute(self, context):
-        # print(self.files)
-
         self.func(context)
-        # Get the folder
+        # get the folder
         for i in self.files:
             folder = os.path.dirname(self.filepath)
             path_to_file = os.path.join(folder, i.name)
@@ -69,9 +67,7 @@ class file_import(Operator, ImportHelper):
         print("file ext is ", file_ex)
         obs = []
         if file_ex == ".stl":
-            # Iterate through the selected files
-
-            # Generate full path to file
+            #  full path to file
             path_to_file = os.path.join(folder, i.name)
             bpy.ops.import_mesh.stl(
                 filepath=path_to_file,
@@ -79,18 +75,42 @@ class file_import(Operator, ImportHelper):
                 axis_up="Y",
                 filter_glob="*.obj;*.stl",
             )
-            # Append Object(s) to the list
+            # Append Object to the list
             obs.append(context.selected_objects[:])
             bpy.context.object.rotation_euler[
                 0
             ] = 4.71239  ## I needed this line idk if eveyone will
-            # bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
+
             obj = bpy.context.object
             obj.name = "importedmodel"
 
+        elif file_ex == ".obj":
+            #  full path to file
+            path_to_file = os.path.join(folder, i.name)
+            if bpy.app.version >= (4, 0, 0):
+                # Blender 4-  old Python OBJ importer was removed --> C++ operator
+                bpy.ops.wm.obj_import(
+                    filepath=path_to_file,
+                    # axis_forward='-Z', not compatible with blender > 4.0
+                    # axis_up='Y', not compatible with blender > 4.0
+                    filter_glob="*.obj;*.stl",
+                )
+            else:
+                # Blender 3-  legacy Python OBJ importer
+                bpy.ops.import_scene.obj(
+                    filepath=path_to_file,
+                    axis_forward="-Z",
+                    axis_up="Y",
+                    filter_glob="*.obj;*.stl",
+                )
+
+            # select what was just imported
+            imported_objects = context.selected_objects[:]
+            if imported_objects:
+                imported_objects[0].name = "importedmodel"
         else:
             try:
-                if bpy.context.scene.blender_photonics.backend == "octave":
+                if bpy.context.scene.neurocaptain.backend == "octave":
                     import oct2py as op
 
                     oc = op.Oct2Py()
@@ -102,9 +122,12 @@ class file_import(Operator, ImportHelper):
                 raise ImportError(
                     "To run this feature, you must install the oct2py or matlab.engine Python modulem first, based on your choice of the backend"
                 )
-
+            print(
+                "the path is:",
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"),
+            )
             oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"))
-            # load json
+
             try:
                 surfdata = oc.feval("loadjson", self.filepath)
                 AddMeshFromNodeFace(
@@ -112,6 +135,7 @@ class file_import(Operator, ImportHelper):
                     (np.array(surfdata["MeshTri3"]) - 1).astype(np.int32).tolist(),
                     "importedmodel",
                 )
+
             # load bmsh
             except:
                 surfdata = oc.feval("surf2jmesh", self.filepath)
@@ -122,5 +146,13 @@ class file_import(Operator, ImportHelper):
                     "importedmodel",
                 )
 
-            print("please rename object in blender to indicate either 'headmesh' or 'LandmarkMesh")
+        mod = bpy.data.objects["importedmodel"]
+        bpy.ops.object.select_all(action="DESELECT")
+        mod.select_set(True)
+        bpy.ops.object.origin_set(type="GEOMETRY_ORIGIN", center="MEDIAN")
+        bpy.ops.view3d.snap_selected_to_cursor(use_offset=False)
+
+        print(
+            "please rename object in blender to indicate either 'headmesh' or 'LandmarkMesh, or use the 'label custom' button to assign landmark geometry"
+        )
         return {"FINISHED"}

@@ -189,17 +189,7 @@ class geo_nodes(Operator):
         node_tree.links.new(mesh_boolean.outputs["Mesh"], out_node.inputs["Geometry"])
 
     def execute(self, context):
-        major, minor, patch = bpy.app.version
-        version_float = float(f"{major}.{minor}")
-        obj = bpy.data.objects["headmesh"]
-
-
-        bpy.context.view_layer.objects.active = obj
-        obj.select_set(True)
-        if version_float >= 4.2:
-        # solidify modifier
-            solidify_mod = obj.modifiers.new(name="Solidify", type='SOLIDIFY')
-            bpy.ops.object.modifier_apply(modifier=solidify_mod.name)
+        obj = bpy.context.object
 
         bpy.ops.object.mode_set(mode="EDIT")
         bm = bmesh.from_edit_mesh(obj.data)
@@ -253,7 +243,8 @@ class geo_nodes(Operator):
         self.update_geo_node_tree(node_tree, self)
         # Version control for Blender, Sample Nearest Surface
 
-
+        major, minor, patch = bpy.app.version
+        version_float = float(f"{major}.{minor}")
 
         if version_float >= 4.2:
             node_tree.links.new(normal_node.outputs["Normal"], sample_nearest_surface.inputs[1])
@@ -276,13 +267,12 @@ class geo_nodes(Operator):
         brainhide.hide_set(True)
         # apply geoemtry nodes automaticcal- remove # from following line to modify
         bpy.ops.object.modifier_apply(modifier="GeometryNodes")
-        print("geonodes applied")
         try:
             bpy.ops.object.mode_set(mode="EDIT")
         except:
             pass
         # decrease number of faces
-        #bpy.ops.mesh.delete(type="FACE")
+        bpy.ops.mesh.delete(type="FACE")
         bpy.ops.object.mode_set(mode="OBJECT")
 
         return {"FINISHED"}

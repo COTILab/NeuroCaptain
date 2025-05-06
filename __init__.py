@@ -48,5 +48,5 @@ def register():
 
 def unregister():
     print("Unregistering NeuroCaptain")
-    bpy.utils.unregister_class(NeuroCaptain_UI)
-    del bpy.types.Scene.blender_photonics
+    # bpy.utils.unregister_class(NeuroCaptain_UI)
+    del bpy.types.Scene.neurocaptain

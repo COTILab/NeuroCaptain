@@ -175,7 +175,7 @@ elseif (exist(fname, 'file'))
 elseif (regexpi(fname, '^\s*(http|https|ftp|file)://'))
     string = urlread(fname);
 else
-    error_pos('input file does not exist');
+    error('input file does not exist');
 end
 
 if (jsonopt('BuiltinJSON', 0, opt) && exist('jsondecode', 'builtin'))
@@ -223,6 +223,10 @@ end
 opt.jsonpath_ = '$';
 if (nargout > 1 || opt.mmaponly)
     mmap = {};
+end
+if (regexp(inputstr, '^\s*$'))
+    data = [];
+    inputlen = 0;
 end
 jsoncount = 1;
 while pos <= inputlen
@@ -278,9 +282,9 @@ if (nargout > 1 || opt.mmaponly)
     mmap = filterjsonmmap(mmap, jsonopt('MMapInclude', {}, opt), 1);
     mmap = cellfun(@(x) {x{1}, x{2}(1:(2 + int8(length(x{2}) >= 3 && (x{2}(3) > 0))))}, mmap, 'UniformOutput', false);
 end
-if (jsonopt('JDataDecode', 1, varargin{:}) == 1)
+if (jsonopt('JDataDecode', 1, opt) == 1)
     try
-        data = jdatadecode(data, 'Base64', 1, 'Recursive', 1, varargin{:});
+        data = jdatadecode(data, 'Base64', 1, 'Recursive', 1, opt);
     catch ME
         warning(['Failed to decode embedded JData annotations, '...
                  'return raw JSON data\n\njdatadecode error: %s\n%s\nCall stack:\n%s\n'], ...

@@ -11,6 +11,8 @@ from .utils import *
 import numpy as np
 import jdata as jd
 
+addon_utils.enable("io_mesh_stl")
+
 enum_action = [
     ("ADD_HEADMESH", "add headmesh", "Access a folder called: HeadModels"),
     ("ADD_BRAIN1020MESH", "add brain1020mesh", "Access a folder called: BrainLandmarks"),
@@ -29,9 +31,9 @@ class select_model(Operator, ImportHelper):
         ]
     )
 
-    filename_ext = ".json,.jmsh,.bmsh,.stl, .off"
+    filename_ext = ".json,.jmsh,.bmsh,.stl, .off,.obj"
     filter_glob: StringProperty(
-        default="*.json;*.jmsh;*.bmsh;*.stl;*.off",
+        default="*.json;*.jmsh;*.bmsh;*.stl;*.off;*.obj",
         options={"HIDDEN"},
     )
     files: CollectionProperty(type=PropertyGroup)
@@ -83,9 +85,9 @@ class select_model(Operator, ImportHelper):
             print("file ext is ", file_ex)
             obs = []
         if file_ex == ".stl":
-            # Iterate through the selected files
+            # iterate through the selected files
 
-            # Generate full path to file
+            #  full path to file
             path_to_file = os.path.join(folder, i.name)
             bpy.ops.import_mesh.stl(
                 filepath=path_to_file,
@@ -93,18 +95,32 @@ class select_model(Operator, ImportHelper):
                 axis_up="Y",
                 filter_glob="*.obj;*.stl",
             )
-            # Append Object(s) to the list
+            # Append objects to the list
             obs.append(context.selected_objects[:])
             bpy.context.object.rotation_euler[
                 0
             ] = 4.71239  ## I needed this line idk if eveyone will
-            # bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
+
             obj = bpy.context.object
             obj.name = "importedmodel"
 
+        elif file_ex == ".obj":
+            #  full path to file
+            path_to_file = os.path.join(folder, i.name)
+            bpy.ops.import_scene.obj(
+                filepath=path_to_file,
+                axis_forward="-Z",
+                axis_up="Y",
+                filter_glob="*.obj;*.stl",
+            )
+            # append to the list
+            imported_objects = context.selected_objects[:]
+            if imported_objects:
+                imported_objects[0].name = "importedmodel"
+
         else:
             try:
-                if bpy.context.scene.blender_photonics.backend == "octave":
+                if bpy.context.scene.neurocaptain.backend == "octave":
                     import oct2py as op
 
                     oc = op.Oct2Py()
@@ -117,7 +133,8 @@ class select_model(Operator, ImportHelper):
                     "To run this feature, you must install the oct2py or matlab.engine Python modulem first, based on your choice of the backend"
                 )
             print(
-                "the path is:", os.path.join(os.path.dirname(os.path.abspath(__file__)), "script")
+                "the path is:",
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"),
             )
             oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"))
 
@@ -174,7 +191,7 @@ class select_model(Operator, ImportHelper):
             OBJECT_OT_duplicate={"linked": False, "mode": "TRANSLATION"},
             TRANSFORM_OT_translate={
                 "value": (0.212906, 0.0140968, 0.0237914),
-                "orient_axis_ortho": "X",
+                # "orient_axis_ortho": "X",
                 "orient_type": "GLOBAL",
                 "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
                 "orient_matrix_type": "GLOBAL",

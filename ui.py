@@ -8,7 +8,7 @@ from .geonode import geo_nodes
 from .dual_mesh_nc import dual_mesh_NC
 from .capgen import cap_generation
 from .circumference import circumference_calc
-from .exportmesh import exportmesh  # type: ignore
+from .exportmesh import exportmesh
 from .customLandmarks import customLandmarks
 
 
@@ -27,17 +27,18 @@ class NeuroCaptain_UI(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         bp = scene.neurocaptain
+
         rowengine = layout.row()
         rowengine.label(text="Backend:")
         rowengine.prop(bp, "backend", expand=True)
 
         layout.separator()
-        layout.label(text="Import Head Model", icon="SHADING_SOLID")
+        layout.label(text="Import Model", icon="SHADING_SOLID")
         cols2m = layout.column()
         cols2m.operator(file_import.bl_idname, icon="IMPORT")
 
         layout.separator()
-        layout.label(text="Choose from Pre-generated Head Model", icon="SHADING_SOLID")
+        layout.label(text="Choose Head Model and Landmark Geometry", icon="SHADING_SOLID")
         rowmod = layout.row()
         rowmod.operator(
             select_model.bl_idname, text="Headmesh", icon="USER"
@@ -48,13 +49,45 @@ class NeuroCaptain_UI(bpy.types.Panel):
 
         layout.separator()
         layout.label(text="Generate 10-20 Landmarks Mesh", icon="SHADING_SOLID")
+
         rowbmesh = layout.row()
-        rowbmesh.operator(brain1020mesh.bl_idname, text="NZ", icon="USER").action = "NZ_SELECT"
-        rowbmesh.operator(brain1020mesh.bl_idname, text="LPA", icon="USER").action = "LPA_SELECT"
-        rowbmesh.operator(brain1020mesh.bl_idname, text="RPA", icon="USER").action = "RPA_SELECT"
+
+        op = rowbmesh.operator(
+            brain1020mesh.bl_idname,
+            text="NZ ✔️" if context.scene.nz_assigned else "NZ",
+            icon="USER",
+        )
+        op.action = "NZ_SELECT"
+
+        op = rowbmesh.operator(
+            brain1020mesh.bl_idname,
+            text="LPA ✔️" if context.scene.lpa_assigned else "LPA",
+            icon="USER",
+        )
+        op.action = "LPA_SELECT"
+
+        op = rowbmesh.operator(
+            brain1020mesh.bl_idname,
+            text="RPA ✔️" if context.scene.rpa_assigned else "RPA",
+            icon="USER",
+        )
+        op.action = "RPA_SELECT"
+
         rowbmesh2 = layout.row()
-        rowbmesh2.operator(brain1020mesh.bl_idname, text="IZ", icon="USER").action = "IZ_SELECT"
-        rowbmesh2.operator(brain1020mesh.bl_idname, text="CZ", icon="USER").action = "CZ_SELECT"
+
+        op = rowbmesh2.operator(
+            brain1020mesh.bl_idname,
+            text="IZ ✔️" if context.scene.iz_assigned else "IZ",
+            icon="USER",
+        )
+        op.action = "IZ_SELECT"
+
+        op = rowbmesh2.operator(
+            brain1020mesh.bl_idname,
+            text="CZ ✔️" if context.scene.cz_assigned else "CZ",
+            icon="USER",
+        )
+        op.action = "CZ_SELECT"
 
         colbmesh = layout.column()
         colbmesh.operator(
@@ -62,6 +95,7 @@ class NeuroCaptain_UI(bpy.types.Panel):
             text="10-20 Mesh Generation",
             icon="OUTLINER_OB_POINTCLOUD",
         ).action = "BRAIN1020_MESH"
+
         layout.separator()
         layout.label(text="Define Custom Landmark Geometry", icon="SHADING_SOLID")
         rowbmesh3 = layout.row()
@@ -108,7 +142,7 @@ class NeuroCaptain_UI(bpy.types.Panel):
         rowcap = layout.row()
         rowcap.operator(
             cap_generation.bl_idname,
-            text="Reference (Nz)",
+            text="Reference(Nz)✔️" if context.scene.nz_assigned else "Reference (Nz)",
             icon="OUTLINER_OB_POINTCLOUD",
         ).action = "REFERENCE_POINT"
         rowcap.operator(
@@ -128,3 +162,15 @@ class NeuroCaptain_UI(bpy.types.Panel):
         layout.label(text="Export Mesh", icon="SHADING_SOLID")
         colexp = layout.column()
         colexp.operator(exportmesh.bl_idname, text="Export Mesh", icon="MOD_DECIM")
+
+
+def register():
+    bpy.utils.register_class(NeuroCaptain_UI)
+    bpy.types.Scene.neurocaptain_selected_action = bpy.props.StringProperty(
+        name="Selected Action", description="Which landmark button is selected?", default=""
+    )
+
+
+def unregister():
+    bpy.utils.unregister_class(NeuroCaptain_UI)
+    del bpy.types.Scene.neurocaptain_selected_action

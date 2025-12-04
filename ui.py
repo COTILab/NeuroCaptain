@@ -12,15 +12,16 @@ from .exportmesh import exportmesh
 from .customLandmarks import customLandmarks
 
 
-class NeuroCaptain_UI(bpy.types.Panel):
+# Parent Panel
+class NEUROCAPTAIN_PT_main_panel(bpy.types.Panel):
     bl_label = "NeuroCaptain v2024"
-    bl_idname = "NeuroCaptain_PT_UI"
+    bl_idname = "NEUROCAPTAIN_PT_main_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "NeuroCaptain"
 
     @classmethod
-    def poll(self, context):
+    def poll(cls, context):
         return context.mode in {"EDIT_MESH", "OBJECT", "PAINT_WEIGHT"}
 
     def draw(self, context):
@@ -32,7 +33,20 @@ class NeuroCaptain_UI(bpy.types.Panel):
         rowengine.label(text="Backend:")
         rowengine.prop(bp, "backend", expand=True)
 
-        layout.separator()
+
+# Sub-panel 1: CapGen
+class NEUROCAPTAIN_PT_capgen_subpanel(bpy.types.Panel):
+    bl_label = "CapGen"
+    bl_idname = "NEUROCAPTAIN_PT_capgen_subpanel"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "NeuroCaptain"
+    bl_parent_id = "NEUROCAPTAIN_PT_main_panel"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
         layout.label(text="Import Model", icon="SHADING_SOLID")
         cols2m = layout.column()
         cols2m.operator(file_import.bl_idname, icon="IMPORT")
@@ -164,13 +178,33 @@ class NeuroCaptain_UI(bpy.types.Panel):
         colexp.operator(exportmesh.bl_idname, text="Export Mesh", icon="MOD_DECIM")
 
 
+# Sub-panel 2: Optodes
+class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
+    bl_label = "Optodes"
+    bl_idname = "NEUROCAPTAIN_PT_optodes_subpanel"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "NeuroCaptain"
+    bl_parent_id = "NEUROCAPTAIN_PT_main_panel"
+
+    def draw(self, context):
+        layout = self.layout
+
+        layout.label(text="fNIRS Probe Import", icon="LIGHT_SUN")
+        layout.operator("neurocaptain.import_sd_probe", text="Import SD Probe", icon="IMPORT")
+
+
 def register():
-    bpy.utils.register_class(NeuroCaptain_UI)
+    bpy.utils.register_class(NEUROCAPTAIN_PT_main_panel)
+    bpy.utils.register_class(NEUROCAPTAIN_PT_capgen_subpanel)
+    bpy.utils.register_class(NEUROCAPTAIN_PT_optodes_subpanel)
     bpy.types.Scene.neurocaptain_selected_action = bpy.props.StringProperty(
         name="Selected Action", description="Which landmark button is selected?", default=""
     )
 
 
 def unregister():
-    bpy.utils.unregister_class(NeuroCaptain_UI)
+    bpy.utils.unregister_class(NEUROCAPTAIN_PT_optodes_subpanel)
+    bpy.utils.unregister_class(NEUROCAPTAIN_PT_capgen_subpanel)
+    bpy.utils.unregister_class(NEUROCAPTAIN_PT_main_panel)
     del bpy.types.Scene.neurocaptain_selected_action

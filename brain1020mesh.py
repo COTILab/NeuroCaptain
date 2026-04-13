@@ -3,7 +3,7 @@ from bpy import context
 import subprocess
 import sys
 from .utils import *
-import oct2py
+from .dependencies import safe_import, require_dependency, show_error_message
 import numpy as np
 import jdata as jd
 import pathlib
@@ -92,11 +92,9 @@ class brain1020mesh(Operator):
         return {"FINISHED"}
 
     def invoke(self, context, event):
-        # Only show dialog for brain1020_mesh action
         if self.action == "BRAIN1020_MESH":
             return context.window_manager.invoke_props_dialog(self)
         else:
-            # \\\\
             return self.execute(context)
 
     @staticmethod
@@ -248,35 +246,37 @@ class brain1020mesh(Operator):
 
     @staticmethod
     def brain1020_mesh(context):
-        print("Entering brain1020_mesh")
+        print("entering brain1020 mesh")
+        
+        pmesh = safe_import('iso2mesh')
+        if pmesh is None:
+            show_error_message("iso2mesh is required for this feature")
+            return {'CANCELLED'}
 
-        # Get the output directory
+        scipy_spatial = safe_import('scipy.spatial')
+        if scipy_spatial is None:
+            show_error_message("scipy is required for this feature")
+            return {'CANCELLED'}
+        
         outputdir = GetBPWorkFolder()
-
-        # Get the active object in the scene
+        if not os.path.isdir(outputdir):
+            os.makedirs(outputdir)
+        
         obj = bpy.context.view_layer.objects.active
-
-        # Initial points Brain1020 uses (vs)
+        
         vs = np.vstack((nz, iz, lpa, rpa, cz))
-
+        
         verts = []
-
-        # Saving the head mesh from the scene
         for n in range(len(obj.data.vertices)):
             vert = obj.data.vertices[n].co
             v_global = obj.matrix_world @ vert
             verts.append(v_global)
-
+        
         faces = [(np.array(face.vertices[:]) + 1).tolist() for face in obj.data.polygons]
-
-        # Convert vertices and faces to numpy arrays
+        
         v = np.array(verts)
         f = np.array(faces)
-
-        print("Verts shape is:", v.shape)
-        print("Face shape is:", f.shape)
-
-        # Mesh data (input requirements for brain1020mesh.m)
+        
         meshdata = {
             "_DataInfo_": {
                 "JMeshVersion": "0.5",
@@ -286,70 +286,84 @@ class brain1020mesh(Operator):
             "MeshTri3": f,
             "param": {"initpoints": vs, "p1": p1, "p2": p2},
         }
-
-        # Save mesh data to file
-        jd.save(meshdata, os.path.join(outputdir, "brain1020input.bmsh"))
-
-        # Backend initialization
+        
+        jd.save(meshdata, os.path.join(outputdir, "brain1020input.jmsh"))
+        
         try:
-            # Check the selected backend from the scene settings
-            if bpy.context.scene.neurocaptain.backend == "octave":
-                import oct2py as op
-
-                oc = op.Oct2Py()
-
-            elif bpy.context.scene.neurocaptain.backend == "matlab":
-                import matlab.engine as op
-
-                oc = op.start_matlab("-nodesktop -nosplash")  # Starting MATLAB engine with options
-
-            else:
-                # If the backend is not recognized, raise an error
-                raise ValueError(
-                    "Unknown backend selected. Please choose either 'octave' or 'matlab'."
-                )
-
-            # Add the script directory to the backend path
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            oc.addpath(os.path.join(script_dir, "script"))
-
-            # Call the brain1020mesh function in the backend
-            oc.feval("brain1020mesh", os.path.join(outputdir, "brain1020input.bmsh"))
-
-        except ImportError:
-            # If the required backend module is not installed
-            print(
-                "To run this feature, you must install the `oct2py` or `matlab.engine` Python module."
+            landmarks = pmesh.brain1020(
+                meshdata["MeshVertex3"],
+                meshdata["MeshTri3"],
+                meshdata["param"]["initpoints"],
+                meshdata["param"]["p1"],
+                meshdata["param"]["p2"],
+                cztol=1e-8,
+                display=0
             )
-            raise ImportError("Backend modules not installed.")
-
+            
+            # points1 rows are in the same order as landmarks[0].keys()
+            # preserve this ordering explicitly
+            label_list = list(landmarks[0].keys())
+            points1 = np.vstack([landmarks[0][k] for k in label_list])
+            
+            tet = scipy_spatial.Delaunay(points1).simplices + 1
+            
+            face = pmesh.volface(tet)[0]
+            face = np.array(face)
+            
+            outputmesh = {
+                "_DataInfo_": {
+                    "JMeshVersion": "0.5",
+                    "Comment": "Created by NeuroCaptain",
+                },
+                "MeshVertex3": points1,
+                "MeshTri3": face
+            }
+            
+            jd.save(outputmesh, os.path.join(outputdir, "brain1020output.jmsh"))
+            
         except Exception as e:
-            # Catch any other exceptions and print the error
-            print(f"Error starting backend: {e}")
-            raise e
-
-        # Load the resulting brain1020 mesh into Blender
-        outputmesh = jd.load(os.path.join(outputdir, "brain1020output.bmsh"))
-
-        # Add mesh from node faces
+            print(f"Error in brain1020_mesh: {e}")
+            import traceback
+            traceback.print_exc()
+            show_error_message(f"Error generating 10-20 mesh: {str(e)}")
+            return {'CANCELLED'}
+        
+        # Remove stale LandmarkMesh before creating new one
+        # This prevents stale landmark_labels from persisting
+        if "LandmarkMesh" in bpy.data.objects:
+            old_mesh = bpy.data.objects["LandmarkMesh"]
+            old_mesh_data = old_mesh.data
+            bpy.data.objects.remove(old_mesh, do_unlink=True)
+            bpy.data.meshes.remove(old_mesh_data)
+        
         AddMeshFromNodeFace(
             outputmesh["MeshVertex3"],
             (np.array(outputmesh["MeshTri3"]) - 1).tolist(),
             "LandmarkMesh",
         )
-
-        # Set the active object to the new LandmarkMesh
-        bpy.context.view_layer.objects.active = bpy.data.objects["LandmarkMesh"]
-
-        # Show a completion message
+        
+        mesh_obj = bpy.data.objects["LandmarkMesh"]
+        num_verts = len(mesh_obj.data.vertices)
+        num_labels = len(label_list)
+        
+        print(f"brain1020_mesh: {num_labels} labels, {num_verts} vertices")
+        
+        if num_labels == num_verts:
+            mesh_obj["landmark_labels"] = label_list
+            print(f"Stored {num_labels} landmark labels: {label_list[:5]}...")
+        else:
+            # Mismatch — clear any stale property and report
+            if "landmark_labels" in mesh_obj:
+                del mesh_obj["landmark_labels"]
+            print(f"WARNING: label count ({num_labels}) != vertex count ({num_verts})")
+            print(f"Labels: {label_list}")
+            show_error_message(
+                f"Landmark label mismatch: {num_labels} labels vs {num_verts} vertices. "
+                f"Labels not stored — import/export will use hardcoded fallback."
+            )
+        
+        bpy.context.view_layer.objects.active = mesh_obj
         ShowMessageBox("Generating 10-20 points is completed", "BrainCapGen")
-
-        print("Exiting brain1020_mesh")
-
-        ShowMessageBox("Generating 10-20 points is completed", "BrainCapGen")
-
-        pass
-
 
 def register():
     bpy.utils.register_class(brain1020mesh)
@@ -364,7 +378,7 @@ def register():
 
 
 def unregister():
-    bpy.utils.unregister_class(brain1020mesh)  # <-- same here
+    bpy.utils.unregister_class(brain1020mesh)
     del bpy.types.Scene.nz_selected
     del bpy.types.Scene.neurocaptain_selected_action
     del bpy.types.Scene.nz_assigned
@@ -372,9 +386,3 @@ def unregister():
     del bpy.types.Scene.rpa_assigned
     del bpy.types.Scene.cz_assigned
     del bpy.types.Scene.iz_assigned
-
-
-# f __name__ == "__main__":
-# register()
-
-# bpy.ops.braincapgen.brain1020mesh("INVOKE_DEFAULT")

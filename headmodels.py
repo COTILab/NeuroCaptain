@@ -1,6 +1,4 @@
 import bpy
-import subprocess
-import sys
 from bpy.props import EnumProperty
 import addon_utils
 from bpy_extras.io_utils import ImportHelper
@@ -107,12 +105,18 @@ class select_model(Operator, ImportHelper):
         elif file_ex == ".obj":
             #  full path to file
             path_to_file = os.path.join(folder, i.name)
-            bpy.ops.import_scene.obj(
-                filepath=path_to_file,
-                axis_forward="-Z",
-                axis_up="Y",
-                filter_glob="*.obj;*.stl",
-            )
+            if bpy.app.version >= (4, 0, 0):
+                bpy.ops.wm.obj_import(
+                    filepath=path_to_file,
+                    filter_glob="*.obj;*.stl",
+                )
+            else:
+                bpy.ops.import_scene.obj(
+                    filepath=path_to_file,
+                    axis_forward="-Z",
+                    axis_up="Y",
+                    filter_glob="*.obj;*.stl",
+                )
             # append to the list
             imported_objects = context.selected_objects[:]
             if imported_objects:
@@ -120,41 +124,29 @@ class select_model(Operator, ImportHelper):
 
         else:
             try:
-                if bpy.context.scene.neurocaptain.backend == "octave":
-                    import oct2py as op
+                surfdata = jd.load(self.filepath)
+                print("Loaded mesh data:", surfdata.keys() if hasattr(surfdata, 'keys') else type(surfdata))
 
-                    oc = op.Oct2Py()
+                if "MeshVertex3" in surfdata and "MeshTri3" in surfdata:
+                    AddMeshFromNodeFace(
+                        surfdata["MeshVertex3"],
+                        (np.array(surfdata["MeshTri3"]) - 1).astype(np.int32).tolist(),
+                        "importedmodel",
+                    )
+                elif "node" in surfdata and "face" in surfdata:
+                    AddMeshFromNodeFace(
+                        surfdata["node"],
+                        (np.array(surfdata["face"]) - 1).astype(np.int32).tolist(),
+                        "importedmodel",
+                    )
                 else:
-                    import matlab.engine as op
+                    show_error_message(f"Unsupported mesh format in file. Available keys: {surfdata.keys()}")
+                    return {'CANCELLED'}
 
-                    oc = op.start_matlab()
-            except ImportError:
-                raise ImportError(
-                    "To run this feature, you must install the oct2py or matlab.engine Python modulem first, based on your choice of the backend"
-                )
-            print(
-                "the path is:",
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"),
-            )
-            oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"))
-
-            try:
-                surfdata = oc.feval("loadjson", self.filepath)
-                AddMeshFromNodeFace(
-                    surfdata["MeshVertex3"],
-                    (np.array(surfdata["MeshTri3"]) - 1).astype(np.int32).tolist(),
-                    "importedmodel",
-                )
-
-            # load bmsh
-            except:
-                surfdata = oc.feval("surf2jmesh", self.filepath)
-                print("data is", surfdata)
-                AddMeshFromNodeFace(
-                    surfdata["MeshVertex3"],
-                    (np.array(surfdata["MeshTri3"]) - 1).astype(np.int16).tolist(),
-                    "importedmodel",
-                )
+            except Exception as e:
+                print(f"Error loading mesh: {e}")
+                show_error_message(f"Failed to load mesh file: {str(e)}")
+                return {'CANCELLED'}
 
         if self.action == "ADD_HEADMESH":
             self.add_headmesh(context=context)

@@ -3,7 +3,7 @@ from bpy import context
 import subprocess
 import sys
 from .utils import *
-import oct2py
+#import oct2py
 import numpy as np
 import jdata as jd
 import pathlib

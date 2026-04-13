@@ -6,6 +6,7 @@ import numpy as np
 import jdata as jd
 import os
 from .utils import *
+from .dependencies import safe_import, require_dependency, show_error_message
 
 
 class file_import(Operator, ImportHelper):
@@ -16,7 +17,6 @@ class file_import(Operator, ImportHelper):
     bl_description = "Import headmesh file"
     bl_options = {"PRESET", "UNDO"}
 
-    # ImportHelperclass uses this
     filename_ext = ".json,.jmsh,.bmsh,.stl, .off,.obj"
 
     filter_glob: StringProperty(
@@ -24,13 +24,11 @@ class file_import(Operator, ImportHelper):
         options={"HIDDEN"},
     )
 
-    # Selected files
     files: CollectionProperty(type=PropertyGroup)
 
     @classmethod
     def func(self, context):
         bpy.ops.object.select_all(action="SELECT")
-        # delete unnecessary default objects
         for ob in bpy.context.selected_objects:
             print(ob.type)
             if (
@@ -56,7 +54,6 @@ class file_import(Operator, ImportHelper):
 
     def execute(self, context):
         self.func(context)
-        # get the folder
         for i in self.files:
             folder = os.path.dirname(self.filepath)
             path_to_file = os.path.join(folder, i.name)
@@ -67,7 +64,6 @@ class file_import(Operator, ImportHelper):
         print("file ext is ", file_ex)
         obs = []
         if file_ex == ".stl":
-            #  full path to file
             path_to_file = os.path.join(folder, i.name)
             bpy.ops.import_mesh.stl(
                 filepath=path_to_file,
@@ -75,28 +71,20 @@ class file_import(Operator, ImportHelper):
                 axis_up="Y",
                 filter_glob="*.obj;*.stl",
             )
-            # Append Object to the list
             obs.append(context.selected_objects[:])
-            bpy.context.object.rotation_euler[
-                0
-            ] = 4.71239  ## I needed this line idk if eveyone will
+            bpy.context.object.rotation_euler[0] = 4.71239
 
             obj = bpy.context.object
             obj.name = "importedmodel"
 
         elif file_ex == ".obj":
-            #  full path to file
             path_to_file = os.path.join(folder, i.name)
             if bpy.app.version >= (4, 0, 0):
-                # Blender 4-  old Python OBJ importer was removed --> C++ operator
                 bpy.ops.wm.obj_import(
                     filepath=path_to_file,
-                    # axis_forward='-Z', not compatible with blender > 4.0
-                    # axis_up='Y', not compatible with blender > 4.0
                     filter_glob="*.obj;*.stl",
                 )
             else:
-                # Blender 3-  legacy Python OBJ importer
                 bpy.ops.import_scene.obj(
                     filepath=path_to_file,
                     axis_forward="-Z",
@@ -104,47 +92,34 @@ class file_import(Operator, ImportHelper):
                     filter_glob="*.obj;*.stl",
                 )
 
-            # select what was just imported
             imported_objects = context.selected_objects[:]
             if imported_objects:
                 imported_objects[0].name = "importedmodel"
         else:
             try:
-                if bpy.context.scene.neurocaptain.backend == "octave":
-                    import oct2py as op
-
-                    oc = op.Oct2Py()
+                surfdata = jd.load(self.filepath)
+                print("Loaded mesh data:", surfdata.keys() if hasattr(surfdata, 'keys') else type(surfdata))
+                
+                if "MeshVertex3" in surfdata and "MeshTri3" in surfdata:
+                    AddMeshFromNodeFace(
+                        surfdata["MeshVertex3"],
+                        (np.array(surfdata["MeshTri3"]) - 1).astype(np.int32).tolist(),
+                        "importedmodel",
+                    )
+                elif "node" in surfdata and "face" in surfdata:
+                    AddMeshFromNodeFace(
+                        surfdata["node"],
+                        (np.array(surfdata["face"]) - 1).astype(np.int32).tolist(),
+                        "importedmodel",
+                    )
                 else:
-                    import matlab.engine as op
-
-                    oc = op.start_matlab()
-            except ImportError:
-                raise ImportError(
-                    "To run this feature, you must install the oct2py or matlab.engine Python modulem first, based on your choice of the backend"
-                )
-            print(
-                "the path is:",
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"),
-            )
-            oc.addpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "script"))
-
-            try:
-                surfdata = oc.feval("loadjson", self.filepath)
-                AddMeshFromNodeFace(
-                    surfdata["MeshVertex3"],
-                    (np.array(surfdata["MeshTri3"]) - 1).astype(np.int32).tolist(),
-                    "importedmodel",
-                )
-
-            # load bmsh
-            except:
-                surfdata = oc.feval("surf2jmesh", self.filepath)
-                print("data is", surfdata)
-                AddMeshFromNodeFace(
-                    surfdata["MeshVertex3"],
-                    (np.array(surfdata["MeshTri3"]) - 1).astype(np.int16).tolist(),
-                    "importedmodel",
-                )
+                    show_error_message(f"Unsupported mesh format in file. Available keys: {surfdata.keys()}")
+                    return {'CANCELLED'}
+                    
+            except Exception as e:
+                print(f"Error loading mesh: {e}")
+                show_error_message(f"Failed to load mesh file: {str(e)}")
+                return {'CANCELLED'}
 
         mod = bpy.data.objects["importedmodel"]
         bpy.ops.object.select_all(action="DESELECT")

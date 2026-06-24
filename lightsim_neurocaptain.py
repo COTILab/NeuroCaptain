@@ -1,7 +1,4 @@
 import sys
-user_site = '/home/users/mccann.as/.local/lib/python3.10/site-packages'
-if user_site not in sys.path:
-    sys.path.insert(0, user_site)
 
 import bpy
 import numpy as np
@@ -30,11 +27,11 @@ except ImportError:
 # OPTICAL PROPERTIES (shared between solvers)
 # =============================================================================
 OPTICAL_PROPERTIES = {
-    1: {'mua': 0.018, 'mus': 7.8, 'g': 0.90, 'n': 1.37},   # scalp
-    2: {'mua': 0.016, 'mus': 9.0, 'g': 0.90, 'n': 1.37},   # skull
-    3: {'mua': 0.004, 'mus': 0.3, 'g': 0.90, 'n': 1.33},   # CSF
-    4: {'mua': 0.036, 'mus': 8.4, 'g': 0.90, 'n': 1.37},   # gray matter
-    5: {'mua': 0.018, 'mus': 11.0, 'g': 0.90, 'n': 1.37}   # white matter
+    1: {'mua': 0.019, 'mus': 7.8,  'g': 0.89, 'n': 1.37},   # scalp
+    2: {'mua': 0.019, 'mus': 7.8,  'g': 0.89, 'n': 1.37},   # skull
+    3: {'mua': 0.004, 'mus': 0.009, 'g': 0.89, 'n': 1.37},  # CSF
+    4: {'mua': 0.02,  'mus': 9.0,  'g': 0.89, 'n': 1.37},   # gray matter
+    5: {'mua': 0.08,  'mus': 40.9, 'g': 0.84, 'n': 1.37},   # white matter
 }
 
 MIN_DEPTH = 2.0  # Minimum projection depth into mesh
@@ -214,7 +211,8 @@ def create_layer_materials(obj, tissue_labels):
             bsdf.inputs['Base Color'].default_value = color
             if len(color) > 3 and color[3] < 1.0:  # If transparent
                 bsdf.inputs['Alpha'].default_value = color[3]
-                mat.blend_method = 'BLEND'
+                if bpy.app.version < (4, 0, 0):
+                    mat.blend_method = 'BLEND'
             
             mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
         
@@ -273,7 +271,7 @@ def import_five_layer_mesh(filepath, context):
             bpy.ops.object.select_all(action='DESELECT')
             obj.select_set(True)
             bpy.context.view_layer.objects.active = obj
-            bpy.ops.object.origin_set(type='GEOMETRY_ORIGIN', center='MEDIAN')
+            bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
         obj.rotation_euler = (0.0, 0.0, 0.0)
         
         # Create layer visualization (optional)
@@ -623,6 +621,12 @@ def run_redbird_forward(nodes, face, elem, seg, srcpos, srcdir, detpos, detdir, 
     
     # Prepare mesh and solve
     cfg, sd = rb.meshprep(cfg)
+
+    if (cfg['evol'] < 0).any():
+        for key in ['evol', 'nvol', 'deldotdel']:
+            cfg.pop(key, None)
+        cfg, sd = rb.meshprep(cfg)
+
     detphi, phi = rb.run(cfg)
     
     return phi, detphi
@@ -787,10 +791,8 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
         nodes        = lmm_module.LAYERED_MESH.nodes.copy()
         elems        = lmm_module.LAYERED_MESH.elems.copy()
         tissue_labels = lmm_module.LAYERED_MESH.tissue_labels.copy()
-        ref_obj = lmm_module.LAYERED_MESH.head_surface_obj
-        if ref_obj is None:
-            ref_obj = (bpy.data.objects.get('Head_Surface_5L') or
-                       bpy.data.objects.get('headmesh'))
+        ref_obj = (bpy.data.objects.get('Head_Surface_5L') or
+                   bpy.data.objects.get('headmesh'))
 
     else:
         # Priority 2: FiveLayerHead in scene (legacy workflow)
@@ -825,18 +827,12 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
     
     bl_verts = get_blender_vertices(ref_obj)
 
-    # Use the scalp surface centroid stored at import time.
-    # nodes.mean() is the centroid of ALL volume nodes — it sits deep inside
-    # the brain and causes optodes to be projected inward, reversing the
-    # sensitivity gradient (deep sulci appear more sensitive than surface).
-    # mesh_centroid is the mean of scalp surface vertices only, matching how
-    # Blender centred Head_Surface_5L.
-    if lmm_module.is_mesh_loaded() and lmm_module.LAYERED_MESH.mesh_centroid is not None:
-        translation = lmm_module.LAYERED_MESH.mesh_centroid - bl_verts.mean(axis=0)
-        print(f"  Translation (scalp centroid): [{translation[0]:.1f}, {translation[1]:.1f}, {translation[2]:.1f}]")
-    else:
-        translation = nodes.mean(axis=0) - bl_verts.mean(axis=0)
-        print(f"  Translation (volume mean fallback): [{translation[0]:.1f}, {translation[1]:.1f}, {translation[2]:.1f}]")
+    # Head_Surface_5L is created with ALL volumetric nodes as vertices,
+    # so Blender's ORIGIN_CENTER_OF_MASS sets the origin at nodes.mean()
+    # (the center of ALL volume nodes).  The translation must match that
+    # origin so Blender→mesh coordinate conversion is exact.
+    translation = nodes.mean(axis=0) - bl_verts.mean(axis=0)
+    print(f"  Translation (volume center): [{translation[0]:.1f}, {translation[1]:.1f}, {translation[2]:.1f}]")
 
     # Use ref object for surface projection
     headmesh = ref_obj
@@ -932,7 +928,8 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
     }
 
 
-def visualize_on_cortex(results, data, smooth_iterations=5):
+def visualize_on_cortex(results, data, smooth_iterations=5,
+                        vmin_override=None, vmax_override=None):
     """Visualize sensitivity map on Brain_Cortex object."""
     print("\n" + "=" * 70)
     print("VISUALIZING ON CORTEX")
@@ -967,9 +964,24 @@ def visualize_on_cortex(results, data, smooth_iterations=5):
     print(f"  Valid mesh nodes (log>-19): {valid_mask.sum():,}  abs_max={valid_log.max():.2f}")
     print(f"  Distribution: " + "  ".join(f"p{p}={v:.1f}" for p, v in zip(pcts, pct_vals)))
 
-    vmax = valid_log.max()
-    vmin = valid_log.min()
-    print(f"  Display window: log10 [{vmin:.1f}, {vmax:.1f}]  (true min/max)")
+    # Allow caller to pin the colormap to a specific log10 range.
+    # If not overridden, fall back to true min/max of this simulation.
+    # Also check scene properties so Redbird (which calls this directly) picks
+    # up the GUI setting without needing to thread it through its runner.
+    if vmin_override is None or vmax_override is None:
+        nc = getattr(bpy.context.scene, "neurocaptain_settings", None)
+        if nc and getattr(nc, "viz_custom_range", False):
+            vmin_override = vmin_override if vmin_override is not None else nc.viz_vmin
+            vmax_override = vmax_override if vmax_override is not None else nc.viz_vmax
+
+    if vmin_override is not None and vmax_override is not None:
+        vmin = float(vmin_override)
+        vmax = float(vmax_override)
+        print(f"  Display window: log10 [{vmin:.1f}, {vmax:.1f}]  (custom range)")
+    else:
+        vmax = valid_log.max()
+        vmin = valid_log.min()
+        print(f"  Display window: log10 [{vmin:.1f}, {vmax:.1f}]  (auto min/max)")
 
     # ── Distance-weighted interpolation onto cortex surface ───────────────────
     # For each cortex vertex, find the k nearest SENSITIVE mesh nodes within
@@ -1018,9 +1030,14 @@ def visualize_on_cortex(results, data, smooth_iterations=5):
 
     # Apply vertex colors — always delete and recreate to avoid stale data
     mesh = cortex.data
-    if 'Sensitivity' in mesh.vertex_colors:
-        mesh.vertex_colors.remove(mesh.vertex_colors['Sensitivity'])
-    vc = mesh.vertex_colors.new(name='Sensitivity')
+    if bpy.app.version >= (4, 0, 0):
+        if 'Sensitivity' in mesh.color_attributes:
+            mesh.color_attributes.remove(mesh.color_attributes['Sensitivity'])
+        vc = mesh.color_attributes.new(name='Sensitivity', type='BYTE_COLOR', domain='CORNER')
+    else:
+        if 'Sensitivity' in mesh.vertex_colors:
+            mesh.vertex_colors.remove(mesh.vertex_colors['Sensitivity'])
+        vc = mesh.vertex_colors.new(name='Sensitivity')
 
     def _colormap(v):
         """Blue→cyan→green→yellow→red, alpha=1 (sensitive node)."""
@@ -1041,7 +1058,10 @@ def visualize_on_cortex(results, data, smooth_iterations=5):
             else:
                 vc.data[li].color = _colormap(0.0)  # lowest heatmap colour — no black background
 
-    mesh.vertex_colors.active = vc
+    if bpy.app.version >= (4, 0, 0):
+        mesh.color_attributes.active_color = vc
+    else:
+        mesh.vertex_colors.active = vc
 
     # Material: Mix Shader — alpha=0 → original brain gray, alpha=1 → heatmap
     mat = bpy.data.materials.get("SensMat") or bpy.data.materials.new("SensMat")
@@ -1052,8 +1072,13 @@ def visualize_on_cortex(results, data, smooth_iterations=5):
     mix  = nt.nodes.new('ShaderNodeMixShader')
     orig = nt.nodes.new('ShaderNodeBsdfPrincipled')   # brain gray (background)
     heat = nt.nodes.new('ShaderNodeBsdfPrincipled')   # heatmap color (sensitive)
-    vcn  = nt.nodes.new('ShaderNodeVertexColor')
-    vcn.layer_name = 'Sensitivity'
+    if bpy.app.version >= (4, 0, 0):
+        vcn = nt.nodes.new('ShaderNodeAttribute')
+        vcn.attribute_name = 'Sensitivity'
+        vcn.attribute_type = 'GEOMETRY'
+    else:
+        vcn = nt.nodes.new('ShaderNodeVertexColor')
+        vcn.layer_name = 'Sensitivity'
     orig.inputs['Base Color'].default_value = (0.70, 0.65, 0.62, 1.0)
     nt.links.new(vcn.outputs['Color'], heat.inputs['Base Color'])
     nt.links.new(vcn.outputs['Alpha'], mix.inputs['Fac'])   # 0=brain, 1=heatmap
@@ -1063,6 +1088,12 @@ def visualize_on_cortex(results, data, smooth_iterations=5):
     mesh.materials.clear()
     mesh.materials.append(mat)
     
+    for hide_name in ('Head_Surface_5L', 'headmesh'):
+        obj = bpy.data.objects.get(hide_name)
+        if obj:
+            obj.hide_viewport = True
+            obj.hide_render = True
+
     # Set viewport shading
     for area in bpy.context.screen.areas:
         if area.type == 'VIEW_3D':
@@ -1070,7 +1101,7 @@ def visualize_on_cortex(results, data, smooth_iterations=5):
                 if space.type == 'VIEW_3D':
                     space.shading.type = 'SOLID'
                     space.shading.color_type = 'VERTEX'
-    
+
     print("  ✓ Done")
 
 
@@ -1089,52 +1120,3 @@ def save_results(results, data, output_path, solver_type):
              solver=solver_type)
     print(f"  Saved: {output_path}")
 
-
-# =============================================================================
-# STANDALONE EXECUTION (for testing)
-# =============================================================================
-if __name__ == "__main__":
-    # Example standalone execution
-    BASE_DIR = '/drives/buzhou1/users/mccann.as/Projects/NeuroCaptain_V2'
-    MESH_PATH = os.path.join(BASE_DIR, 'mesh1_7_14.mat')
-    OUTPUT_DIR = os.path.join(BASE_DIR, 'sensitivity_output')
-    
-    SOLVER = 'redbird'  # or 'mmc'
-    
-    print("\n" + "=" * 70)
-    print(f"SENSITIVITY ANALYSIS - {SOLVER.upper()} SOLVER")
-    print("=" * 70 + "\n")
-    
-    # Check solver availability
-    if SOLVER == 'redbird' and not REDBIRD_AVAILABLE:
-        print("✗ Redbird not available. Install with: pip install redbirdpy")
-        sys.exit(1)
-    elif SOLVER == 'mmc' and not MMC_AVAILABLE:
-        print("✗ MMC (pmmc) not available")
-        sys.exit(1)
-    
-    try:
-        data = load_mesh_and_register_optodes(MESH_PATH)
-        
-        if SOLVER == 'redbird':
-            settings = {'mode': 'CW', 'frequency': 70.0, 'sd_max_distance': 60.0}
-            results = run_sensitivity_redbird(data, settings)
-        else:
-            settings = {'nphoton': 1000, 'gpu_id': '01', 'sd_max_distance': 60.0}
-            results = run_sensitivity_mmc(data, settings)
-        
-        if results:
-            output_path = os.path.join(OUTPUT_DIR, f'sensitivity_{SOLVER}.npz')
-            save_results(results, data, output_path, SOLVER)
-            visualize_on_cortex(results, data, smooth_iterations=5)
-            
-            print("\n" + "=" * 70)
-            print(f"✓ COMPLETE ({SOLVER.upper()})")
-            print("=" * 70)
-        else:
-            print("\n✗ FAILED")
-            
-    except Exception as e:
-        import traceback
-        print(f"\n✗ {e}")
-        traceback.print_exc()

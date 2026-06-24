@@ -55,7 +55,8 @@ def get_inward_normal_at_point(pos, mesh_obj):
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         bm.to_mesh(mesh_obj.data)
         bm.free()
-        mesh_obj.data.calc_normals()
+        if bpy.app.version < (4, 1, 0):
+            mesh_obj.data.calc_normals()
         _normals_fixed.add(mesh_obj.name)
         print(f"  Normals recalculated (outward) for: {mesh_obj.name}")
     
@@ -224,10 +225,11 @@ def run_redbird_simulation():
     
     print(f"\nFull mesh: {len(nodes):,} nodes, {len(elems):,} elements")
     
-    # Get reference head surface
-    headmesh = mesh_data.head_surface_obj # five-layer mesh
+    # Get reference head surface (look up by name — stored references go stale)
+    headmesh = bpy.data.objects.get('Head_Surface_5L')
     if not headmesh:
         headmesh = bpy.data.objects.get('headmesh')
+    print(f"  Reference surface: {headmesh.name if headmesh else 'NONE'}")
     
     if not headmesh:
         return {
@@ -237,18 +239,12 @@ def run_redbird_simulation():
     
     bl_verts = get_blender_vertices(headmesh)
 
-    # Use the scalp surface centroid stored at import time.
-    # nodes.mean() is the centroid of ALL 241K volume nodes — it sits deep
-    # inside the brain, not at the scalp surface.  Using it as the translation
-    # pushes optodes inward by ~10-20 mm, making deep sulci appear more sensitive
-    # than the surface.  mesh_centroid is the mean of scalp surface vertices
-    # only, which matches how Blender centered Head_Surface_5L.
-    if mesh_data.mesh_centroid is not None:
-        translation = mesh_data.mesh_centroid - bl_verts.mean(axis=0)
-        print(f"  Translation (scalp centroid): {translation}")
-    else:
-        translation = nodes.mean(axis=0) - bl_verts.mean(axis=0)
-        print(f"  Translation (volume mean fallback): {translation}")
+    # Head_Surface_5L is created with ALL volumetric nodes as vertices,
+    # so Blender's ORIGIN_CENTER_OF_MASS sets the origin at nodes.mean()
+    # (the center of ALL volume nodes).  The translation must match that
+    # origin so Blender→mesh coordinate conversion is exact.
+    translation = nodes.mean(axis=0) - bl_verts.mean(axis=0)
+    print(f"  Translation (volume center): [{translation[0]:.1f}, {translation[1]:.1f}, {translation[2]:.1f}]")
 
     mesh_center = nodes.mean(axis=0)  # kept as brain interior reference for normal checks
     
@@ -267,10 +263,22 @@ def run_redbird_simulation():
     
     ns, nd = len(sources), len(detectors)
     print(f"  Registered: {ns} sources, {nd} detectors")
-    
+
     if ns == 0 or nd == 0:
         return {'success': False, 'message': 'Need sources and detectors'}
-    
+
+    # Diagnostic: verify sources are within mesh bounding box
+    nmin, nmax = nodes.min(axis=0), nodes.max(axis=0)
+    print(f"\n  Mesh bbox: x=[{nmin[0]:.1f},{nmax[0]:.1f}] y=[{nmin[1]:.1f},{nmax[1]:.1f}] z=[{nmin[2]:.1f},{nmax[2]:.1f}]")
+    for i in range(min(3, ns)):
+        s = sources[i]
+        inside = np.all(s >= nmin) and np.all(s <= nmax)
+        print(f"    S{i+1}: [{s[0]:.1f},{s[1]:.1f},{s[2]:.1f}] {'inside bbox ✓' if inside else 'OUTSIDE bbox ✗'}")
+    for i in range(min(3, nd)):
+        d = detectors[i]
+        inside = np.all(d >= nmin) and np.all(d <= nmax)
+        print(f"    D{i+1}: [{d[0]:.1f},{d[1]:.1f},{d[2]:.1f}] {'inside bbox ✓' if inside else 'OUTSIDE bbox ✗'}")
+
     # Diagnostic: verify normals point inward --> get NaN phi values otherwise
     print("\n  Direction sanity check:")
     for i in range(min(3, ns)):
@@ -310,6 +318,7 @@ def run_redbird_simulation():
     rb_elem = cropped_elems[:, :4].copy()
     if rb_elem.min() == 0:
         rb_elem += 1
+
     rb_elem = np.ascontiguousarray(rb_elem, dtype=np.int32)
     
     rb_seg = np.ascontiguousarray(cropped_seg, dtype=np.int32)
@@ -395,7 +404,30 @@ def run_redbird_simulation():
     t0 = time.time()
     cfg, sd = rb.meshprep(cfg)
     print(f"  Mesh prep: {time.time()-t0:.1f}s")
+
+    # meshreorient (called inside meshprep) correctly fixes element winding
+    # but returns the ORIGINAL signed volumes, not the corrected ones.
+    # For meshes that needed reorientation (e.g. NeuroJSON), evol/nvol/deldotdel
+    # are all computed from those stale negative volumes.  Delete them and let
+    # the second meshprep pass recompute with unsigned elemvolume (always positive).
+    if (cfg['evol'] < 0).any():
+        n_neg = int((cfg['evol'] < 0).sum())
+        print(f"  Fixing stale signed volumes: {n_neg:,}/{len(cfg['evol']):,} negative")
+        for key in ['evol', 'nvol', 'deldotdel']:
+            cfg.pop(key, None)
+        cfg, sd = rb.meshprep(cfg)
+        print(f"  Recomputed: evol min={cfg['evol'].min():.6f} max={cfg['evol'].max():.6f} neg={int((cfg['evol']<0).sum())}")
     
+    # Diagnostic: check mesh data going into RedBird
+    print(f"\n  RedBird cfg check:")
+    print(f"    node: shape={cfg['node'].shape} dtype={cfg['node'].dtype} range=[{cfg['node'].min():.1f},{cfg['node'].max():.1f}]")
+    print(f"    elem: shape={cfg['elem'].shape} dtype={cfg['elem'].dtype} range=[{cfg['elem'].min()},{cfg['elem'].max()}]")
+    print(f"    seg:  shape={cfg['seg'].shape} dtype={cfg['seg'].dtype} unique={np.unique(cfg['seg']).tolist()}")
+    print(f"    srcpos: shape={cfg['srcpos'].shape}")
+    print(f"    evol: min={cfg['evol'].min():.6f} max={cfg['evol'].max():.6f} neg={int((cfg['evol']<0).sum())}")
+    if 'face' in cfg:
+        print(f"    face: shape={cfg['face'].shape} dtype={cfg['face'].dtype} range=[{cfg['face'].min()},{cfg['face'].max()}]")
+
     # Forward solve — phi shape: (nn_crop, ns)
     print("\n1. Forward simulation...")
     t0 = time.time()
@@ -479,9 +511,7 @@ def run_redbird_simulation():
     print("VISUALIZING ON BRAIN CORTEX")
     print("=" * 70)
     
-    cortex = mesh_data.cortex_obj
-    if not cortex:
-        cortex = bpy.data.objects.get('Brain_Cortex_5L')
+    cortex = bpy.data.objects.get('Brain_Cortex_5L')
     
     if not cortex:
         return {
@@ -505,65 +535,86 @@ def run_redbird_simulation():
     print(f"  In simulated region: {in_simulated_region.sum():,}")
     print(f"  Outside region: {(~in_simulated_region).sum():,}")
     
-    # initally set all to background
+    # initially set all to background
     norm = np.zeros(len(bl_verts))
-    
-    #  sensitivity for vertices in simulated region
+
+    # sensitivity for vertices in simulated region
     sens_in_region = sens_log_crop[idx_crop[in_simulated_region]]
-    
+
     # normalize only simulated region
     if in_simulated_region.sum() > 0:
-        valid_sens = sens_in_region[sens_in_region > -15]
+        valid_sens = sens_in_region[sens_in_region > -19]
         if len(valid_sens) > 0:
-            vmin = np.percentile(valid_sens, 5)
-            vmax = np.percentile(valid_sens, 95)
-            
+            # Check for custom range from GUI
+            nc = getattr(bpy.context.scene, "neurocaptain_settings", None)
+            if nc and getattr(nc, "viz_custom_range", False):
+                vmin = float(nc.viz_vmin)
+                vmax = float(nc.viz_vmax)
+                print(f"  Sensitivity range: [{vmin:.1f}, {vmax:.1f}]  (custom range)")
+            else:
+                vmin = float(np.percentile(valid_sens, 5))
+                vmax = float(np.percentile(valid_sens, 95))
+                print(f"  Sensitivity range: [{vmin:.1f}, {vmax:.1f}]  (auto 5th-95th percentile)")
+
             if vmax > vmin:
                 sens_clipped = np.clip(sens_in_region, vmin, vmax)
                 norm[in_simulated_region] = (sens_clipped - vmin) / (vmax - vmin)
-            
-            print(f"  Sensitivity range: [{vmin:.1f}, {vmax:.1f}]")
     
     # apply vertex colors
     mesh = cortex.data
     
     # clear old sensitivity
-    if 'Sensitivity' in mesh.vertex_colors:
-        mesh.vertex_colors.remove(mesh.vertex_colors['Sensitivity'])
+    if bpy.app.version >= (4, 0, 0):
+        if 'Sensitivity' in mesh.color_attributes:
+            mesh.color_attributes.remove(mesh.color_attributes['Sensitivity'])
+        vc = mesh.color_attributes.new(name='Sensitivity', type='BYTE_COLOR', domain='CORNER')
+    else:
+        if 'Sensitivity' in mesh.vertex_colors:
+            mesh.vertex_colors.remove(mesh.vertex_colors['Sensitivity'])
+        vc = mesh.vertex_colors.new(name='Sensitivity')
     
-    vc = mesh.vertex_colors.new(name='Sensitivity')
-    
-    def blue_red_colormap(v, in_region):
-        """Blue-to-red heatmap: blue -> cyan -> green -> yellow -> red.
-        Outside the simulated region: dark blue background."""
-        if not in_region:
-            return (0.10, 0.15, 0.30, 1.0)   # dark blue background
-
-        # 4-segment smooth blue → cyan → green → yellow → red
+    def blue_red_colormap(v):
+        """Blue → cyan → green → yellow → red heatmap."""
         if v < 0.25:
             t = v / 0.25
-            return (0.0,       t,   1.0, 1.0)
+            return (0.0, t,       1.0,       1.0)
         elif v < 0.5:
             t = (v - 0.25) / 0.25
-            return (0.0,       1.0, 1.0 - t, 1.0)
+            return (0.0, 1.0,     1.0 - t,   1.0)
         elif v < 0.75:
             t = (v - 0.5) / 0.25
-            return (t,         1.0, 0.0, 1.0)
+            return (t,   1.0,     0.0,       1.0)
         else:
             t = (v - 0.75) / 0.25
-            return (1.0, 1.0 - t,  0.0, 1.0)
+            return (1.0, 1.0 - t, 0.0,       1.0)
     
     for poly in mesh.polygons:
         for li in poly.loop_indices:
             vi = mesh.loops[li].vertex_index
-            vc.data[li].color = blue_red_colormap(norm[vi], in_simulated_region[vi])
+            vc.data[li].color = blue_red_colormap(norm[vi])
     
-    mesh.vertex_colors.active = vc
-    
+    if bpy.app.version >= (4, 0, 0):
+        mesh.color_attributes.active_color = vc
+    else:
+        mesh.vertex_colors.active = vc
+
+    for hide_name in ('Head_Surface_5L', 'headmesh'):
+        obj = bpy.data.objects.get(hide_name)
+        if obj:
+            obj.hide_viewport = True
+            obj.hide_render = True
+
+    for area in bpy.context.screen.areas:
+        if area.type == 'VIEW_3D':
+            for space in area.spaces:
+                if space.type == 'VIEW_3D':
+                    space.shading.type = 'SOLID'
+                    space.shading.color_type = 'VERTEX'
+
     print("\n" + "=" * 70)
     print("✓ SIMULATION COMPLETE")
     print("=" * 70)
-    
+
     return {
         'success': True,
         'message': 'Redbird simulation completed successfully'

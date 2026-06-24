@@ -3,7 +3,6 @@ from bpy import context
 import subprocess
 import sys
 from .utils import *
-#import oct2py
 import numpy as np
 import jdata as jd
 import pathlib
@@ -22,6 +21,11 @@ enum_action = [
         "custom_mesh",
         "select the mesh corresponding to custom landmark geometry then press button",
     ),
+    (
+        "OPTODE_LANDMARKS",
+        "optode_landmarks",
+        "Create LandmarkMesh from Source and Detector optode scalp-surface positions",
+    ),
 ]
 
 
@@ -33,6 +37,7 @@ class customLandmarks(Operator):
         items=[
             ("CUSTOM_GENERATE", "custom_generate", "select the vertices of desired landmarks"),
             ("CUSTOM_MESH", "custom_mesh", "custom_mesh"),
+            ("OPTODE_LANDMARKS", "optode_landmarks", "Create LandmarkMesh from optode positions"),
         ]
     )
 
@@ -45,7 +50,6 @@ class customLandmarks(Operator):
 
     def execute(self, context):
         outputdir = GetBPWorkFolder()
-        print("output directory is:", outputdir)
         if not os.path.isdir(outputdir):
             os.makedirs(outputdir)
         obj = bpy.context.view_layer.objects.active
@@ -56,6 +60,9 @@ class customLandmarks(Operator):
 
         elif self.action == "CUSTOM_MESH":
             self.custom_mesh(context=context)
+
+        elif self.action == "OPTODE_LANDMARKS":
+            return self.optode_landmarks(context=context)
 
         return {"FINISHED"}
 
@@ -93,7 +100,6 @@ class customLandmarks(Operator):
         ][-1]
         new_obj.name = "LandmarkMesh"
         new_obj.data.name = "LandmarkMesh"
-        pass
 
     @staticmethod
     def custom_mesh(context):
@@ -102,18 +108,66 @@ class customLandmarks(Operator):
             obj.name = "LandmarkMesh"
         else:
             print("Please select a mesh object corresponding to the desired landmarks.")
-        pass
 
+    def optode_landmarks(self, context):
+        from mathutils import Vector
+        from mathutils.bvhtree import BVHTree
 
-def register():
-    bpy.utils.register_class(init_points)
+        depsgraph = context.evaluated_depsgraph_get()
 
+        optodes = []
+        for obj in bpy.data.objects:
+            parts = obj.name.split("_")
+            if len(parts) >= 2 and parts[0] in ("Source", "Detector") and obj.type == "MESH":
+                try:
+                    int(parts[1])
+                except ValueError:
+                    continue
+                optodes.append(obj)
 
-def unregister():
-    bpy.utils.unregister_class(init_points)
+        if not optodes:
+            self.report({"WARNING"}, "No Source_* or Detector_* objects found")
+            return {"CANCELLED"}
 
+        optodes.sort(key=lambda o: (0 if o.name.startswith("Source") else 1,
+                                    int(o.name.split("_")[1])))
 
-if __name__ == "__main__":
-    register()
+        headmesh = bpy.data.objects.get("headmesh")
+        bvh = None
+        head_mat_inv = None
+        head_mat = None
+        if headmesh and headmesh.type == "MESH":
+            bvh = BVHTree.FromObject(headmesh, depsgraph)
+            head_mat = headmesh.matrix_world.copy()
+            head_mat_inv = head_mat.inverted()
 
-    bpy.ops.braincapgen.brain1020mesh("INVOKE_DEFAULT")
+        positions = []
+        names = []
+        for obj in optodes:
+            eval_obj = obj.evaluated_get(depsgraph)
+            world_pos = eval_obj.matrix_world.translation.copy()
+
+            if bvh is not None:
+                local_pos = head_mat_inv @ world_pos
+                loc, _, _, _ = bvh.find_nearest(local_pos)
+                if loc is not None:
+                    world_pos = head_mat @ loc
+
+            positions.append(world_pos)
+            names.append(obj.name)
+
+        old_lm = bpy.data.objects.get("LandmarkMesh")
+        if old_lm:
+            bpy.data.objects.remove(old_lm, do_unlink=True)
+
+        mesh_data = bpy.data.meshes.new("LandmarkMesh")
+        mesh_data.from_pydata([list(p) for p in positions], [], [])
+        mesh_data.update()
+
+        lm_obj = bpy.data.objects.new("LandmarkMesh", mesh_data)
+        context.collection.objects.link(lm_obj)
+
+        lm_obj["landmark_labels"] = names
+
+        self.report({"INFO"}, f"Created LandmarkMesh from {len(positions)} optodes")
+        return {"FINISHED"}

@@ -13,6 +13,7 @@ from .customLandmarks import customLandmarks
 from .optode_utils import (
     NEUROCAPTAIN_OT_add_source,
     NEUROCAPTAIN_OT_add_detector,
+    NEUROCAPTAIN_OT_move_optode,
     NEUROCAPTAIN_OT_ensure_optode_constraints,
 )
 from .optode_connect import (
@@ -32,8 +33,8 @@ from .landmark_labels import (
     NEUROCAPTAIN_OT_display_landmark_labels,
     NEUROCAPTAIN_OT_toggle_landmark_labels,
 )
-from .optodeJSON_manualSpring import (
-    NEUROCAPTAIN_OT_import_optode_json_manualSpring,
+from .optodeJSON_blenderGoal import (
+    NEUROCAPTAIN_OT_import_optode_json_blender_goal,
     NEUROCAPTAIN_OT_relax_probe_manual,
 )
 from .optode_modules import (
@@ -46,6 +47,7 @@ from . import lightsim_neurocaptain as lightsim
 from . import layered_mesh_manager as lmm
 from . import NeuroJSON_MeshLoader as njloader
 from . import schematic_2d
+from . import probe_variability
 
 
 # ============================================================================
@@ -75,6 +77,22 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
     )
     mmc_use_gpu: bpy.props.BoolProperty(name="Use GPU", default=True)
     mmc_gpu_id:  bpy.props.StringProperty(name="GPU ID", default="01")
+    # Sensitivity colormap range (shared by MMC and Redbird)
+    viz_custom_range: bpy.props.BoolProperty(
+        name="Custom Colormap Range",
+        description="Override the auto min/max range for the sensitivity colormap",
+        default=False,
+    )
+    viz_vmin: bpy.props.FloatProperty(
+        name="Min (log10)",
+        description="Minimum log10 sensitivity value mapped to the lowest colormap color",
+        default=-15.0, min=-30.0, max=0.0, precision=1,
+    )
+    viz_vmax: bpy.props.FloatProperty(
+        name="Max (log10)",
+        description="Maximum log10 sensitivity value mapped to the highest colormap color",
+        default=-5.0, min=-30.0, max=0.0, precision=1,
+    )
     # Redbird
     redbird_mode: bpy.props.EnumProperty(
         name="Mode",
@@ -165,11 +183,19 @@ class NEUROCAPTAIN_OT_setup_mmc(bpy.types.Operator):
         'g':   'Anisotropy (g)',
         'n':   'Ref Index (n)',
     }
+    _LAYER_DEFAULTS = {
+        1: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
+        2: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
+        3: {'mua': 0.004, 'mus': 0.009, 'g': 0.89, 'n': 1.37},
+        4: {'mua': 0.02,  'mus': 9.0,   'g': 0.89, 'n': 1.37},
+        5: {'mua': 0.08,  'mus': 40.9,  'g': 0.84, 'n': 1.37},
+    }
     __annotations__ = {}
     for _l, _lname in enumerate(_LAYER_NAMES, 1):
-        for _p, _d in [('mua', 0.018), ('mus', 7.8), ('g', 0.9), ('n', 1.37)]:
+        for _p in ('mua', 'mus', 'g', 'n'):
             __annotations__[f'layer{_l}_{_p}'] = bpy.props.FloatProperty(
-                name=_PARAM_LABELS[_p], default=_d, min=0.001, max=20.0, precision=3
+                name=_PARAM_LABELS[_p], default=_LAYER_DEFAULTS[_l][_p],
+                min=0.0, max=100.0, precision=4,
             )
 
     def invoke(self, context, event):
@@ -261,7 +287,11 @@ class NEUROCAPTAIN_OT_run_mmc(bpy.types.Operator):
                 'sd_max_distance': nc.sd_max_distance,
             })
             if results:
-                lightsim.visualize_on_cortex(results, data, smooth_iterations=nc.smooth_iterations)
+                vmin = nc.viz_vmin if nc.viz_custom_range else None
+                vmax = nc.viz_vmax if nc.viz_custom_range else None
+                lightsim.visualize_on_cortex(results, data,
+                                             smooth_iterations=nc.smooth_iterations,
+                                             vmin_override=vmin, vmax_override=vmax)
                 self.report({'INFO'}, "MMC complete — sensitivity on cortex.")
                 return {'FINISHED'}
             self.report({'ERROR'}, "MMC failed — see console.")
@@ -283,11 +313,19 @@ class NEUROCAPTAIN_OT_setup_redbird(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     # Optical properties per layer (5 layers × 4 params)
+    _LAYER_DEFAULTS = {
+        1: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
+        2: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
+        3: {'mua': 0.004, 'mus': 0.009, 'g': 0.89, 'n': 1.37},
+        4: {'mua': 0.02,  'mus': 9.0,   'g': 0.89, 'n': 1.37},
+        5: {'mua': 0.08,  'mus': 40.9,  'g': 0.84, 'n': 1.37},
+    }
     __annotations__ = {}
     for _l in range(1, 6):
-        for _p, _d in [('mua', 0.018), ('mus', 7.8), ('g', 0.9), ('n', 1.37)]:
+        for _p in ('mua', 'mus', 'g', 'n'):
             __annotations__[f'layer{_l}_{_p}'] = bpy.props.FloatProperty(
-                name=f'L{_l} {_p}', default=_d, min=0.001, max=20.0, precision=3
+                name=f'L{_l} {_p}', default=_LAYER_DEFAULTS[_l][_p],
+                min=0.0, max=100.0, precision=4,
             )
 
     def invoke(self, context, event):
@@ -368,6 +406,14 @@ class NEUROCAPTAIN_OT_run_redbird(bpy.types.Operator):
                 self.report({'ERROR'}, f"No {label} found.")
                 return {'CANCELLED'}
         try:
+            nc = context.scene.neurocaptain_settings
+            lmm.setup_redbird_config(
+                mode=nc.redbird_mode, frequency=nc.redbird_frequency,
+                sd_max_distance=nc.sd_max_distance,
+                crop_margin=nc.redbird_crop_margin,
+                min_depth=nc.redbird_min_depth, smooth_iterations=nc.smooth_iterations,
+                max_iter=nc.redbird_max_iter, regularization_lambda=nc.redbird_lambda,
+            )
             from . import redbird_runner
             result = redbird_runner.run_redbird_simulation()
             self.report({'INFO'} if result['success'] else {'ERROR'},
@@ -489,6 +535,9 @@ class NEUROCAPTAIN_PT_capgen_subpanel(bpy.types.Panel):
         layout.operator(brain1020mesh.bl_idname,
                         text="10-20 Mesh Generation",
                         icon="OUTLINER_OB_POINTCLOUD").action = "BRAIN1020_MESH"
+        layout.prop(scene, "save_landmark_file")
+        if scene.save_landmark_file:
+            layout.prop(scene, "save_landmark_filepath")
 
         layout.label(text="Landmark Labels", icon="FONT_DATA")
         layout.operator("neurocaptain.display_landmark_labels", text="Generate 10-20 Labels", icon="ADD")
@@ -498,8 +547,9 @@ class NEUROCAPTAIN_PT_capgen_subpanel(bpy.types.Panel):
         layout.separator()
         layout.label(text="Custom Landmark Geometry", icon="SHADING_SOLID")
         row = layout.row()
-        row.operator(customLandmarks.bl_idname, text="Generate Custom", icon="USER").action = "CUSTOM_GENERATE"
-        row.operator(customLandmarks.bl_idname, text="Label Custom",    icon="USER").action = "CUSTOM_MESH"
+        row.operator(customLandmarks.bl_idname, text="Generate Custom",   icon="USER").action = "CUSTOM_GENERATE"
+        row.operator(customLandmarks.bl_idname, text="Label Custom",      icon="USER").action = "CUSTOM_MESH"
+        row.operator(customLandmarks.bl_idname, text="Optode Landmarks",  icon="LIGHTPROBE_VOLUME" if bpy.app.version >= (4, 2, 0) else "LIGHTPROBE_GRID").action = "OPTODE_LANDMARKS"
 
         layout.separator()
         layout.label(text="Mesh Tools", icon="SHADING_SOLID")
@@ -554,8 +604,11 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
         row = layout.row()
         row.operator("neurocaptain.add_source",   text="Add Source",   icon="LIGHT_SUN")
         row.operator("neurocaptain.add_detector", text="Add Detector", icon="RADIOBUT_OFF")
-        layout.operator("neurocaptain.ensure_optode_constraints",
-                        text="Constrain to Head", icon="CONSTRAINT")
+        row = layout.row()
+        row.operator("neurocaptain.move_optode",
+                     text="Move Selected", icon="RESTRICT_SELECT_OFF")
+        row.operator("neurocaptain.ensure_optode_constraints",
+                     text="Constrain to Head", icon="CONSTRAINT")
 
         # ── Landmark labels ──────────────────────────────────────────────
         layout.separator()
@@ -568,8 +621,8 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
         layout.separator()
         layout.label(text="Probe Import", icon="IMPORT")
         row = layout.row()
-        row.operator("neurocaptain.import_sd_probe",                  text="Import SD",   icon="FILEBROWSER")
-        row.operator("neurocaptain.import_optode_json_manual_spring", text="Import JSON", icon="IMPORT")
+        row.operator("neurocaptain.import_sd_probe",                 text="Import SD",   icon="FILEBROWSER")
+        row.operator("neurocaptain.import_optode_json_blender_goal", text="Import JSON", icon="IMPORT")
 
         # Spring relaxation status
         if "Optode_Connections" in bpy.data.objects:
@@ -615,7 +668,7 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
         # ── Transform / Export ───────────────────────────────────────────
         layout.separator()
         layout.operator("neurocaptain.rigid_rotate_optodes",  text="Rigid Rotate Selected", icon="CON_ROTLIKE")
-        layout.operator("neurocaptain.export_optode_json",    text="Export JSON Config",     icon="EXPORT")
+        layout.operator("neurocaptain.export_optode_json",    text="Export Optode Config",     icon="EXPORT")
 
         # ── 2D Schematic ─────────────────────────────────────────────────
         layout.separator()
@@ -629,7 +682,7 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
             box.operator("neurocaptain.open_2d_schematic", text="Open Schematic", icon="IMAGE_DATA")
         else:
             box.label(text="No scene optodes — will import JSON", icon="IMPORT")
-            box.operator("neurocaptain.open_2d_schematic", text="Import JSON & Open", icon="FILEBROWSER")
+            box.operator("neurocaptain.open_2d_schematic", text="Import Probe & Visualize", icon="FILEBROWSER")
         box.operator("neurocaptain.refresh_2d_schematic", text="Refresh", icon="FILE_REFRESH")
         col = box.column(align=True)
         col.label(text="Landmark overlay:")
@@ -641,6 +694,21 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
         row.prop(nc, "schematic_show_channels", toggle=True)
         if nc.schematic_show_channels:
             row.prop(nc, "sd_max_distance", text="Max mm")
+
+        # ── Probe Variability Analysis ──────────────────────────────────
+        layout.separator()
+        layout.label(text="Probe Variability Analysis", icon="FORCE_VORTEX")
+        box = layout.box()
+        box.label(text="Individual Subject", icon="USER")
+        box.operator("neurocaptain.export_subject_json",
+                     text="Export Subject Probe Evaluation", icon="EXPORT")
+
+        box.separator()
+        box.label(text="Group Analysis", icon="COMMUNITY")
+        box.operator("neurocaptain.run_variability",
+                     text="Run Group Analysis", icon="PLAY")
+        box.operator("neurocaptain.variability_clear",
+                     text="Clear Results", icon="TRASH")
 
 
 # ── Light Simulation ─────────────────────────────────────────────────────────
@@ -682,7 +750,7 @@ class NEUROCAPTAIN_PT_lightsim_subpanel(bpy.types.Panel):
         # ── MMC ──────────────────────────────────────────────────────────
         layout.separator()
         box = layout.box()
-        box.label(text="MMC (Monte Carlo)", icon="LIGHTPROBE_GRID")
+        box.label(text="MMC (Monte Carlo)", icon="LIGHTPROBE_VOLUME" if bpy.app.version >= (4, 2, 0) else "LIGHTPROBE_GRID")
         if lmm.is_mesh_loaded():
             info_row = box.row()
             info_row.label(text=f"✓ Mesh ready ({lmm.LAYERED_MESH.num_layers} layers)", icon='CHECKMARK')
@@ -692,11 +760,17 @@ class NEUROCAPTAIN_PT_lightsim_subpanel(bpy.types.Panel):
         row.enabled = lmm.is_mesh_loaded()
         row.operator("neurocaptain.setup_mmc", text="Configure", icon="SETTINGS")
         row.operator("neurocaptain.run_mmc",   text="Run",       icon="PLAY")
+        # Custom colormap range (MMC)
+        box.prop(nc, "viz_custom_range", icon="FCURVE")
+        if nc.viz_custom_range:
+            row2 = box.row(align=True)
+            row2.prop(nc, "viz_vmin", text="Min")
+            row2.prop(nc, "viz_vmax", text="Max")
 
         # ── Redbird ──────────────────────────────────────────────────────
         layout.separator()
         box = layout.box()
-        box.label(text="Redbird (Diffusion)", icon="LIGHTPROBE_PLANAR")
+        box.label(text="Redbird (Diffusion)", icon="LIGHT_SUN")
         if lmm.is_mesh_loaded():
             box.operator("neurocaptain.show_redbird_config", text="Show Config", icon="INFO")
         else:
@@ -706,6 +780,12 @@ class NEUROCAPTAIN_PT_lightsim_subpanel(bpy.types.Panel):
         row.enabled = lmm.is_mesh_loaded()
         row.operator("neurocaptain.setup_redbird", text="Configure", icon="SETTINGS")
         row.operator("neurocaptain.run_redbird",   text="Run",       icon="PLAY")
+        # Custom colormap range (Redbird)
+        box.prop(nc, "viz_custom_range", icon="FCURVE")
+        if nc.viz_custom_range:
+            row2 = box.row(align=True)
+            row2.prop(nc, "viz_vmin", text="Min")
+            row2.prop(nc, "viz_vmax", text="Max")
 
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
@@ -770,6 +850,7 @@ CLASSES = [
     NEUROCAPTAIN_OT_show_redbird_config,
     NEUROCAPTAIN_OT_add_source,
     NEUROCAPTAIN_OT_add_detector,
+    NEUROCAPTAIN_OT_move_optode,
     NEUROCAPTAIN_OT_ensure_optode_constraints,
     NEUROCAPTAIN_PT_main_panel,
     NEUROCAPTAIN_PT_capgen_subpanel,

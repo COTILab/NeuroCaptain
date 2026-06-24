@@ -54,7 +54,7 @@ _SET_1010 = frozenset(l for l in LABELS_1010 if l) | frozenset([
 _SKIP_LABELS = {""}   # show everything including Lpa/Rpa
 
 IMAGE_NAME = "NeuroCaptain_Schematic"
-IMG_W = IMG_H = 700
+IMG_W = IMG_H = 2800
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -381,8 +381,8 @@ CH_COL    = (0.80, 0.20, 0.95, 1.0)   # bright purple — must be visible on dar
 CH_COL2   = (0.95, 0.50, 1.00, 0.7)
 SRC_FILL  = (0.95, 0.25, 0.25, 1.0)   # red
 SRC_OUT   = (1.00, 0.55, 0.55, 1.0)
-DET_FILL  = (0.12, 0.14, 0.18, 1.0)   # near-black
-DET_OUT   = (0.75, 0.80, 0.85, 1.0)   # light grey ring
+DET_FILL  = (0.10, 0.75, 0.30, 1.0)   # green
+DET_OUT   = (0.20, 0.90, 0.45, 1.0)   # lighter green
 WHITE     = (1.0,  1.0,  1.0,  1.0)
 BLACK     = (0.0,  0.0,  0.0,  1.0)
 
@@ -424,12 +424,12 @@ def draw_schematic_to_image(data, show_lm_labels=False):
     erx,ery = int(R*0.07), int(R*0.13)
     _fe(buf,W,cx-R,cy,erx,ery,DISK_FILL)
     _fe(buf,W,cx+R,cy,erx,ery,DISK_FILL)
-    _oe(buf,W,cx-R,cy,erx,ery,OUTLINE,t=3)
-    _oe(buf,W,cx+R,cy,erx,ery,OUTLINE,t=3)
+    _oe(buf,W,cx-R,cy,erx,ery,OUTLINE,t=8)
+    _oe(buf,W,cx+R,cy,erx,ery,OUTLINE,t=8)
 
     # ── Head outline ─────────────────────────────────────────
-    _oc(buf,W,cx,cy,R,  OUTLINE,t=2)
-    _oc(buf,W,cx,cy,R-1,OUTLINE,t=1)
+    _oc(buf,W,cx,cy,R,  OUTLINE,t=8)
+    _oc(buf,W,cx,cy,R-1,OUTLINE,t=4)
 
     # ── Nose triangle pointing DOWN in pixel space ────────────
     # v2 uses cy + ny*R  (plus), so +ny = DOWN in pixels.
@@ -450,49 +450,44 @@ def draw_schematic_to_image(data, show_lm_labels=False):
         # v2 to_px: cx + nx*R,  cy + ny*R  (+ not -)
         x1 = cx + ch["nx1"]*R;  y1 = cy + ch["ny1"]*R
         x2 = cx + ch["nx2"]*R;  y2 = cy + ch["ny2"]*R
-        _line(buf,W,x1,y1,x2,y2,CH_COL, t=3)
-        _line(buf,W,x1,y1,x2,y2,CH_COL2,t=1)
+        _line(buf,W,x1,y1,x2,y2,CH_COL, t=8)
+        _line(buf,W,x1,y1,x2,y2,CH_COL2,t=3)
 
     # ── Landmark dots + labels ────────────────────────────────
-    FIDUCIALS = {"Lpa","Rpa","LPA","RPA","Nz","Iz"}
-    FID_COL   = (0.95, 0.75, 0.20, 1.0)   # gold for fiducials
     for lbl,lnx,lny in data["landmark_points"]:
         lx = cx + lnx*R
         ly = cy + lny*R
-        col = FID_COL if lbl in FIDUCIALS else LM_COL
-        _fc(buf,W,lx,ly,5,DISK_FILL)
-        _oc(buf,W,lx,ly,5,col,t=2)
+        _fc(buf,W,lx,ly,19,WHITE)
         if show_lm_labels:
-            tw  = len(lbl)*6
+            sc = 10
+            tw  = len(lbl)*6*sc
             tx  = int(lx) - tw//2
-            ty  = int(ly) + 7
-            for bx in range(tx-1, tx+tw+1):
-                for by in range(ty-1, ty+9):
+            ty  = int(ly) + 26
+            for bx in range(tx-3, tx+tw+3):
+                for by in range(ty-3, ty+7*sc+4):
                     _sp(buf,W,bx,by,(0.05,0.10,0.16,0.80))
-            _txt(buf,W,tx,ty,lbl,col,sc=1)
+            _txt(buf,W,tx,ty,lbl,WHITE,sc=sc)
 
     # ── Optodes ───────────────────────────────────────────────
     for pt in data["optode_points"]:
         px_ = cx + pt["nx"]*R
         py_ = cy + pt["ny"]*R
         if pt["type"] == "source":
-            _fc(buf,W,px_,py_,7,  SRC_FILL)
-            _oc(buf,W,px_,py_,7,  SRC_OUT, t=2)
+            _fc(buf,W,px_,py_,27, SRC_FILL)
         else:
-            _fc(buf,W,px_,py_,6,  DET_FILL)
-            _oc(buf,W,px_,py_,6,  DET_OUT, t=2)
+            _fc(buf,W,px_,py_,23, DET_FILL)
 
     # ── Legend ────────────────────────────────────────────────
-    lx,ly = 10, 10
-    _fc(buf,W,lx+6,ly+6,5,SRC_FILL); _oc(buf,W,lx+6,ly+6,5,SRC_OUT,t=1)
-    _txt(buf,W,lx+14,ly+3,"SOURCE",SRC_OUT)
-    ly+=18
-    _fc(buf,W,lx+6,ly+6,5,DET_FILL); _oc(buf,W,lx+6,ly+6,5,DET_OUT,t=1)
-    _txt(buf,W,lx+14,ly+3,"DETECTOR",DET_OUT)
+    lx,ly = 24, 24
+    _fc(buf,W,lx+20,ly+28,20,SRC_FILL)
+    _txt(buf,W,lx+50,ly+7,"SOURCE",SRC_OUT,sc=7)
+    ly+=70
+    _fc(buf,W,lx+20,ly+28,20,DET_FILL)
+    _txt(buf,W,lx+50,ly+7,"DETECTOR",DET_OUT,sc=7)
     if data["channel_lines"]:
-        ly+=18
-        _line(buf,W,lx,ly+6,lx+14,ly+6,CH_COL,t=2)
-        _txt(buf,W,lx+17,ly+3,f"CHANNEL {len(data['channel_lines'])}",CH_COL)
+        ly+=70
+        _line(buf,W,lx,ly+28,lx+40,ly+28,CH_COL,t=7)
+        _txt(buf,W,lx+50,ly+7,f"CHANNEL {len(data['channel_lines'])}",CH_COL,sc=7)
 
     img.pixels.foreach_set(buf)
     img.update()

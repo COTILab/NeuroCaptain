@@ -5,6 +5,7 @@ import math
 import numpy as np
 from scipy.spatial import Delaunay
 from mathutils.bvhtree import BVHTree
+from collections import defaultdict
 
 
 # HELPER FUNCTIONS
@@ -435,7 +436,14 @@ class NEUROCAPTAIN_OT_modify_spring_properties(bpy.types.Operator):
                 optode_pair = sorted([optode1_name, optode2_name])
                 edge_key = f"{optode_pair[0]}_{optode_pair[1]}"
                 
-                rest_length = (edge.verts[0].co - edge.verts[1].co).length
+                # Use actual optode world positions — mesh verts may be stale
+                # if optodes were moved since the last connection sync.
+                o1_obj = context.scene.objects.get(optode1_name)
+                o2_obj = context.scene.objects.get(optode2_name)
+                if o1_obj and o2_obj:
+                    rest_length = (o1_obj.location - o2_obj.location).length
+                else:
+                    rest_length = (edge.verts[0].co - edge.verts[1].co).length
                 # update to spring states for json export
                 spring_states[edge_key] = {
                     "optode1": optode1_name,
@@ -479,10 +487,21 @@ class NEUROCAPTAIN_OT_modify_spring_properties(bpy.types.Operator):
             bevel_mod.limit_method = 'WEIGHT'
             bevel_mod.affect = 'EDGES'
         
-        self.report({'INFO'}, 
+        # Capture current world positions of all anchors found via the
+        # Anchor Indicators collection so relaxation can snap them back.
+        anchor_coll = bpy.data.collections.get("Anchor Indicators")
+        if anchor_coll:
+            n_anchors = 0
+            for indicator in anchor_coll.objects:
+                if indicator.parent:
+                    indicator.parent["is_anchor"]  = 1
+                    indicator.parent["anchor_pos"] = list(indicator.parent.location)
+                    n_anchors += 1
+
+        self.report({'INFO'},
                    f"Set flexible spring properties for {num_modified} edges "
                    f"(Pull: {self.spring_pull:.2f}, Push: {self.spring_push:.2f})")
-        
+
         return {'FINISHED'}
 
 
@@ -497,7 +516,7 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
         description="Set a custom distance between optodes",
         default=False
     )
-    
+
     target_distance: bpy.props.FloatProperty(
         name="Target Distance (mm)",
         description="Target distance between optodes",
@@ -506,7 +525,7 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
         max=200.0,
         unit='LENGTH'
     )
-    
+
     distance_type: bpy.props.EnumProperty(
         name="Distance Type",
         description="Type of distance calculation",
@@ -516,17 +535,26 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
         ],
         default='EUCLIDEAN'
     )
-    
+
+    fix_distance: bpy.props.BoolProperty(
+        name="Fix to Current Distance",
+        description="Lock the edge length so the cloth simulation preserves "
+                    "this exact distance during registration",
+        default=False
+    )
+
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
-    
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "set_distance")
-        
+
         if self.set_distance:
             layout.prop(self, "target_distance")
             layout.prop(self, "distance_type")
+
+        layout.prop(self, "fix_distance")
     
     def calculate_geodesic_distance(self, mesh, v1_co, v2_co):
         """calculate approximate geodesic distance along headmesh surface"""
@@ -621,13 +649,21 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
                     rest_length = self.target_distance
                     edges_to_update.append((optode1_name, optode2_name, edge))
                 else:
-                    rest_length = (edge.verts[0].co - edge.verts[1].co).length
+                    # Use actual optode world positions — mesh verts may be stale
+                    # if optodes were moved since the last connection sync.
+                    o1_obj = context.scene.objects.get(optode1_name)
+                    o2_obj = context.scene.objects.get(optode2_name)
+                    if o1_obj and o2_obj:
+                        rest_length = (o1_obj.location - o2_obj.location).length
+                    else:
+                        rest_length = (edge.verts[0].co - edge.verts[1].co).length
                 
                 if edge_key in spring_states:
                     spring_states[edge_key]["rest_length"] = rest_length
                     spring_states[edge_key]["pull"] = 0.9
                     spring_states[edge_key]["push"] = 0.9
                     spring_states[edge_key]["is_flexible"] = False
+                    spring_states[edge_key]["fix_distance"] = self.fix_distance
                 else:
                     spring_states[edge_key] = {
                         "optode1": optode1_name,
@@ -635,7 +671,8 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
                         "rest_length": rest_length,
                         "pull": 0.9,
                         "push": 0.9,
-                        "is_flexible": False
+                        "is_flexible": False,
+                        "fix_distance": self.fix_distance,
                     }
                 
                 edge[bevel_layer] = 0.0
@@ -682,10 +719,21 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
             if head_mesh:
                 head_mesh.free()
         
+        # Capture current world positions of all anchors found via the
+        # Anchor Indicators collection so relaxation can snap them back.
+        anchor_coll = bpy.data.collections.get("Anchor Indicators")
+        if anchor_coll:
+            n_anchors = 0
+            for indicator in anchor_coll.objects:
+                if indicator.parent:
+                    indicator.parent["is_anchor"]  = 1
+                    indicator.parent["anchor_pos"] = list(indicator.parent.location)
+                    n_anchors += 1
+
         msg = f"Made {num_processed} springs stiff"
         if self.set_distance:
             msg += f" with {self.distance_type.lower()} distance {self.target_distance:.1f}mm"
-        
+
         self.report({'INFO'}, msg)
         return {'FINISHED'}
 
@@ -697,133 +745,91 @@ class NEUROCAPTAIN_OT_update_optode_connections(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        # Check for Optode_Connections
+        import bmesh
+
         if "Optode_Connections" not in bpy.data.objects:
             self.report({'ERROR'}, "No Optode_Connections object found")
             return {'CANCELLED'}
-        
+
         conn_obj = bpy.data.objects["Optode_Connections"]
-        
-        # Get list of optode names in order
-        optode_names = conn_obj.get("optode_names", [])
-        if not optode_names:
-            self.report({'ERROR'}, "No optode_names data found on Optode_Connections")
-            return {'CANCELLED'}
-        
-        print("\n=== Starting position update ===")
-        
-        # STEP 1: Get evaluated positions BEFORE disabling anything
-        depsgraph = context.evaluated_depsgraph_get()
-        
-        # Store target positions (where hooks have pulled vertices)
-        target_positions = {}
-        for i, optode_name in enumerate(optode_names):
-            optode = bpy.data.objects.get(optode_name)
-            if optode and i < len(conn_obj.data.vertices):
-                optode_eval = optode.evaluated_get(depsgraph)
-                target_positions[i] = optode_eval.matrix_world.translation.copy()
-        
-        print(f"Collected {len(target_positions)} target positions")
-        
-        # STEP 2: Switch to Edit Mode to modify base mesh
+
+        prev_active = context.view_layer.objects.active
+
+        # Must be in Object mode before any selection ops.
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
         bpy.ops.object.select_all(action='DESELECT')
         conn_obj.select_set(True)
         context.view_layer.objects.active = conn_obj
-        
-        # Must be in object mode first
-        if context.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-        
+
+        conn_world = conn_obj.matrix_world
+        conn_inv   = conn_world.inverted()
+
+        # ── Build vertex → optode map from hook modifiers ────────────────────
+        # This is more reliable than the optode_names index list because hook
+        # modifiers store the vertex group explicitly.
+        hook_vert_map = {}   # vert_index  →  hook modifier
+        for mod in conn_obj.modifiers:
+            if mod.type != 'HOOK' or not mod.object or not mod.vertex_group:
+                continue
+            vg_name = mod.vertex_group
+            if vg_name not in conn_obj.vertex_groups:
+                continue
+            vg = conn_obj.vertex_groups[vg_name]
+            for v in conn_obj.data.vertices:
+                try:
+                    if vg.weight(v.index) > 0.5:
+                        hook_vert_map[v.index] = mod
+                        break
+                except RuntimeError:
+                    pass
+
+        if not hook_vert_map:
+            self.report({'WARNING'}, "No hook modifiers found on Optode_Connections")
+            return {'CANCELLED'}
+
+        # ── STEP 1: update base mesh via bmesh in Edit mode ──────────────────
+        # bmesh writes are guaranteed to persist; direct object-mode vertex
+        # writes can silently fail in Blender 3.x.
         bpy.ops.object.mode_set(mode='EDIT')
-        
-        # Get bmesh for editing
-        import bmesh
         bm = bmesh.from_edit_mesh(conn_obj.data)
         bm.verts.ensure_lookup_table()
-        
-        updated_count = 0
-        max_distance = 0.0
-        
-        print("=== Updating base mesh vertices ===")
-        
-        # STEP 3: Update base mesh vertices
-        conn_world_matrix_inv = conn_obj.matrix_world.inverted()
-        
-        for i, target_world_pos in target_positions.items():
-            if i >= len(bm.verts):
+
+        updated = 0
+        for vert_idx, mod in hook_vert_map.items():
+            if vert_idx >= len(bm.verts):
                 continue
-            
-            vert = bm.verts[i]
-            old_pos = vert.co.copy()
-            
-            # Convert to local space
-            target_local_pos = conn_world_matrix_inv @ target_world_pos
-            
-            # Update vertex
-            vert.co = target_local_pos
-            
-            distance = (vert.co - old_pos).length
-            if distance > 0.001:
-                optode_name = optode_names[i]
-                print(f"  Vertex {i} ({optode_name}): moved {distance:.4f} units")
-                updated_count += 1
-                if distance > max_distance:
-                    max_distance = distance
-        
-        # STEP 4: Apply changes and return to object mode
+            new_co = conn_inv @ mod.object.matrix_world.translation
+            old_co = bm.verts[vert_idx].co.copy()
+            bm.verts[vert_idx].co = new_co          # always write
+            dist = (old_co - new_co).length
+            if dist > 1e-4:
+                updated += 1
+
         bmesh.update_edit_mesh(conn_obj.data)
         bpy.ops.object.mode_set(mode='OBJECT')
-        
-        print("=== Resetting hooks ===")
-        
-        # STEP 5: Reset each hook modifier
-        # This makes hooks recalculate their reference positions
+
+        # ── STEP 2: reset hook reference matrices ────────────────────────────
+        # Formula (Blender object_hook.cc):
+        #   mod.matrix = inv(hook_obj.matrix_world) @ conn_obj.matrix_world
+        # Zero net displacement at current optode pos; tracks future movement.
+        n_reset = 0
         for mod in conn_obj.modifiers:
-            if mod.type == 'HOOK':
-                # Find the vertex this hook controls
-                if mod.vertex_group and mod.vertex_group in conn_obj.vertex_groups:
-                    vgroup = conn_obj.vertex_groups[mod.vertex_group]
-                    
-                    # Select only this vertex
-                    for v in conn_obj.data.vertices:
-                        v.select = False
-                    
-                    for v in conn_obj.data.vertices:
-                        try:
-                            weight = vgroup.weight(v.index)
-                            if weight > 0.5:
-                                v.select = True
-                                break
-                        except:
-                            pass
-                    
-                    # Enter edit mode to reset this hook
-                    bpy.ops.object.mode_set(mode='EDIT')
-                    bpy.ops.object.hook_reset(modifier=mod.name)
-                    bpy.ops.object.mode_set(mode='OBJECT')
-                    
-                    print(f"  Reset {mod.name}")
-        
-        # Deselect all
-        for v in conn_obj.data.vertices:
-            v.select = False
-        
-        # STEP 6: Force complete scene update
+            if mod.type == 'HOOK' and mod.object:
+                mod.matrix = mod.object.matrix_world.inverted() @ conn_world
+                n_reset += 1
+
         context.view_layer.update()
-        depsgraph.update()
-        
-        print(f"=== Update complete: {updated_count} vertices moved ===\n")
-        
-        # Build report message
-        msg = f"Snapped {updated_count} vertices to optodes"
-        if max_distance > 0:
-            msg += f" (max distance: {max_distance:.4f})"
-        
-        if updated_count == 0:
-            self.report({'INFO'}, "All vertices already aligned with optodes")
-        else:
-            self.report({'INFO'}, msg)
-        
+
+        # Restore previous active object.
+        bpy.ops.object.select_all(action='DESELECT')
+        if prev_active and prev_active.name in bpy.data.objects:
+            context.view_layer.objects.active = prev_active
+
+        msg = (f"Synced {updated} vertices, reset {n_reset} hooks"
+               if updated else f"Already in sync — refreshed {n_reset} hook matrices")
+        self.report({'INFO'}, msg)
         return {'FINISHED'}
 
 
@@ -926,13 +932,21 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
             conn_obj = bpy.data.objects["Optode_Connections"]
             spring_states = conn_obj.get("spring_states", {})
             for edge_key, props in spring_states.items():
+                n1, n2 = props["optode1"], props["optode2"]
+                o1 = bpy.data.objects.get(n1)
+                o2 = bpy.data.objects.get(n2)
+                if o1 and o2:
+                    current_rest = (o1.location - o2.location).length
+                else:
+                    current_rest = float(props["rest_length"])
                 springs.append({
-                    "optode1": props["optode1"],
-                    "optode2": props["optode2"],
-                    "rest_length": float(props["rest_length"]),
+                    "optode1": n1,
+                    "optode2": n2,
+                    "rest_length": current_rest,
                     "pull": float(props["pull"]),
                     "push": float(props["push"]),
                     "is_flexible": bool(props["is_flexible"]),
+                    "fix_distance": bool(props.get("fix_distance", False)),
                 })
 
         if not springs:
@@ -1023,15 +1037,13 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
 
         bary = self._barycentric_coords(point, v0, v1, v2)
         if bary is None:
-            return None  # degenerate triangle
+            return None
 
-        # Build labels — use index-qualified labels for uniqueness
         vlabels = []
         for vi in vert_indices:
             raw = landmark_labels[vi] if vi < len(landmark_labels) else ""
             vlabels.append(raw if raw else f"vertex_{vi}")
 
-        # Nearest-landmark fallback (brute-force closest vertex)
         min_dist = float('inf')
         closest_idx = -1
         for i, vert in enumerate(landmark_mesh.data.vertices):
@@ -1070,7 +1082,7 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
         d11 = e2.dot(e2); d12 = e2.dot(ep)
         denom = d00 * d11 - d01 * d01
         if abs(denom) < 1e-12:
-            return None  # degenerate
+            return None
         inv = 1.0 / denom
         u = (d11 * d02 - d01 * d12) * inv
         v = (d00 * d12 - d01 * d02) * inv
@@ -1157,11 +1169,6 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
         num_source_landmarks = config.get("metadata", {}).get("num_landmarks", 0)
         same_landmark_system = (num_source_landmarks == num_target_landmarks and num_target_landmarks > 0)
 
-        print(f"\n{'='*60}")
-        print(f"JSON IMPORT v{version}  |  source landmarks: {num_source_landmarks}  |  target landmarks: {num_target_landmarks}")
-        print(f"Same landmark system: {same_landmark_system}")
-        print(f"{'='*60}")
-
         # ── Head scale ───────────────────────────────────────────────────
         optode_diameter, optode_thickness = self._get_head_scale(headmesh)
         head_bvh = BVHTree.FromObject(headmesh, context.evaluated_depsgraph_get())
@@ -1220,17 +1227,9 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
 
             optode_objects[name] = optode
 
-        print(f"\nPlacement summary:")
-        print(f"  Barycentric (index):  {placement_stats['barycentric_index']}")
-        print(f"  Barycentric (label):  {placement_stats['barycentric_label']}")
-        print(f"  Nearest landmark:     {placement_stats['nearest_lm']}")
-        print(f"  Raw position:         {placement_stats['raw']}")
-
         # ── Light spring relaxation ──────────────────────────────────────
         connections = config.get("connections", [])
         if self.relaxation_iterations > 0 and connections:
-            print(f"\nRunning light relaxation: {self.relaxation_iterations} iterations, "
-                  f"step={self.relaxation_step}, damping={self.relaxation_damping}")
             self._run_light_relaxation(
                 context, optode_objects, connections, head_bvh,
                 n_iters=self.relaxation_iterations,
@@ -1239,21 +1238,52 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
             )
 
         # ── Build connection mesh + hooks + soft body ────────────────────
-        mesh = bpy.data.meshes.new("Optode_Connections")
+        # Mirror the Delaunay/distance approach: bmesh, same material, same hooks
+        if "Optode_Connections" in bpy.data.objects:
+            bpy.data.objects.remove(bpy.data.objects["Optode_Connections"], do_unlink=True)
+
+        mesh = bpy.data.meshes.new("Optode_Connections_Mesh")
         conn_obj = bpy.data.objects.new("Optode_Connections", mesh)
         context.collection.objects.link(conn_obj)
+
+        bm = bmesh.new()
+        depsgraph = context.evaluated_depsgraph_get()
 
         names_ordered = list(optode_objects.keys())
         name_to_idx = {n: i for i, n in enumerate(names_ordered)}
 
-        vertices = [optode_objects[n].location.copy() for n in names_ordered]
-        edges = []
+        optode_to_vert = {}
+        for idx, oname in enumerate(names_ordered):
+            optode = optode_objects[oname]
+            optode_eval = optode.evaluated_get(depsgraph)
+            final_position = optode_eval.matrix_world.translation
+            vert = bm.verts.new(final_position)
+            optode_to_vert[oname] = vert
+            vert.index = idx
+
+        bm.verts.ensure_lookup_table()
+
+        created_edges = 0
+        edge_info = []
         spring_states = {}
 
         for cd in connections:
             n1, n2 = cd["optode1"], cd["optode2"]
             if n1 in name_to_idx and n2 in name_to_idx:
-                edges.append((name_to_idx[n1], name_to_idx[n2]))
+                vert1 = optode_to_vert[n1]
+                vert2 = optode_to_vert[n2]
+                bm.edges.new([vert1, vert2])
+                created_edges += 1
+
+                distance = float(cd["rest_length"])
+                edge_info.append({
+                    'optode1': n1,
+                    'optode2': n2,
+                    'length': distance,
+                    'v1_idx': name_to_idx[n1],
+                    'v2_idx': name_to_idx[n2],
+                })
+
                 ek = f"{min(n1, n2)}_{max(n1, n2)}"
                 spring_states[ek] = {
                     "optode1": n1, "optode2": n2,
@@ -1262,80 +1292,46 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
                     "is_flexible": cd["is_flexible"],
                 }
 
-        mesh.from_pydata(vertices, edges, [])
-        mesh.update()
+        bm.to_mesh(mesh)
+        bm.free()
+
+        conn_obj["optode_names"] = names_ordered
+        conn_obj["edge_info"] = edge_info
         conn_obj["spring_states"] = spring_states
+        conn_obj["is_optode_connections"] = True
 
-        mat = bpy.data.materials.get("Connection_Material")
-        if not mat:
-            mat = bpy.data.materials.new(name="Connection_Material")
-            mat.use_nodes = True
-            mat.node_tree.nodes["Principled BSDF"].inputs[0].default_value = (0.8, 0.8, 0.8, 1)
-        if conn_obj.data.materials:
-            conn_obj.data.materials[0] = mat
-        else:
-            conn_obj.data.materials.append(mat)
+        conn_obj.display_type = 'WIRE'
+        create_connection_material(conn_obj, "Optode_Connection_Stiff", (0.2, 0.5, 1.0, 1.0))
 
-        # Vertex groups + hooks
-        bpy.ops.object.select_all(action='DESELECT')
-        conn_obj.select_set(True)
-        context.view_layer.objects.active = conn_obj
-
-        for i, oname in enumerate(names_ordered):
-            vg = conn_obj.vertex_groups.new(name=f"VG_{oname}")
-            vg.add([i], 1.0, 'REPLACE')
-
-        print(f"\n=== Creating hooks for {len(names_ordered)} optodes ===")
-        bpy.ops.object.select_all(action='DESELECT')
-        conn_obj.select_set(True)
-        context.view_layer.objects.active = conn_obj
-
-        for i, oname in enumerate(names_ordered):
-            optode = optode_objects[oname]
-            bpy.ops.object.mode_set(mode='OBJECT')
-            hm = conn_obj.modifiers.new(name=f"Hook_{oname}", type='HOOK')
-            hm.object = optode
-            hm.vertex_group = f"VG_{oname}"
-            for v in conn_obj.data.vertices:
-                v.select = False
-            conn_obj.data.vertices[i].select = True
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.object.hook_assign(modifier=hm.name)
-            bpy.ops.object.hook_reset(modifier=hm.name)
-            bpy.ops.object.hook_recenter(modifier=hm.name)
-
-        bpy.ops.object.mode_set(mode='OBJECT')
-        context.view_layer.update()
-        print("=== Hook creation complete ===")
+        optodes_ordered = [optode_objects[n] for n in names_ordered]
+        setup_optode_hooks(conn_obj, optodes_ordered)
 
         # Soft body
         context.view_layer.objects.active = conn_obj
-        sb_mod = conn_obj.modifiers.new(name="Softbody", type='SOFT_BODY')
-        sb = sb_mod.settings
+        soft_body_mod = conn_obj.modifiers.new(name="Softbody", type='SOFT_BODY')
+        sb_settings = conn_obj.soft_body
 
         goal_group = conn_obj.vertex_groups.new(name="Goals")
         for i, oname in enumerate(names_ordered):
             if optode_objects[oname].get("is_anchor", 0):
                 goal_group.add([i], 1.0, 'REPLACE')
 
-        sb.use_goal = True
-        sb.goal_default = 0.0
-        sb.vertex_group_goal = "Goals"
-        sb.goal_spring = 0.99
-        sb.goal_friction = 0.0
-        sb.use_edges = True
-        sb.pull = 0.9
-        sb.push = 0.9
-        sb.damping = 0.5
-        sb.plastic = 0
-        sb.bend = 0.5
-        sb.use_edge_collision = False
-        sb.use_face_collision = False
-        sb.collision_type = 'MANUAL'
-        sb.step_min = 10
-        sb.step_max = 100
-        sb.mass = 1.0
-        sb.speed = 1.0
+        sb_settings.use_edges = True
+        sb_settings.use_goal = True
+        sb_settings.goal_default = 0.0
+        sb_settings.vertex_group_goal = "Goals"
+        sb_settings.goal_spring = 0.99
+        sb_settings.goal_friction = 0.0
+        sb_settings.pull = 0.9
+        sb_settings.push = 0.9
+        sb_settings.damping = 0.5
+        sb_settings.plastic = 0
+        sb_settings.bend = 0.5
+        sb_settings.spring_length = 0
+        sb_settings.use_stiff_quads = False
+        sb_settings.use_edge_collision = False
+        sb_settings.use_face_collision = False
+        sb_settings.use_self_collision = False
 
         self.report(
             {'INFO'},
@@ -1380,7 +1376,6 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
                             landmark_mesh, stored_indices, bary
                         )
                         if pos is not None:
-                            print(f"  {name}: BARY-INDEX  tri=[{stored_indices}]  w={[f'{b:.3f}' for b in bary]}")
                             return pos, "barycentric_index"
 
                 # ── Strategy 2: vertex labels (cross-system) ─────────────
@@ -1393,7 +1388,6 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
                             landmark_mesh, resolved, bary
                         )
                         if pos is not None:
-                            print(f"  {name}: BARY-LABEL  labels={vlabels} -> idx={resolved}  w={[f'{b:.3f}' for b in bary]}")
                             return pos, "barycentric_label"
 
                 self.report({'WARNING'}, f"{name}: barycentric labels/indices failed, trying fallback")
@@ -1410,7 +1404,6 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
                     lm_idx = candidates[0]
                     lm_world = landmark_mesh.matrix_world @ landmark_mesh.data.vertices[lm_idx].co
                     pos = lm_world + Vector(offset)
-                    print(f"  {name}: NEAREST-LM  landmark={lm_name}  idx={lm_idx}")
                     return pos, "nearest_lm"
 
         # ── Strategy 4: raw position ─────────────────────────────────────
@@ -1418,7 +1411,6 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
         is_anchor = optode_data.get("is_anchor", False)
         if is_anchor:
             self.report({'WARNING'}, f"Anchor {name}: using RAW position — cross-atlas will be wrong!")
-        print(f"  {name}: RAW POSITION FALLBACK")
         return pos, "raw"
 
     @staticmethod
@@ -1595,8 +1587,11 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
             bsdf.inputs['Metallic'].default_value = 0.3
             bsdf.inputs['Roughness'].default_value = 0.4
         optode.data.materials.append(mat)
-        for face in optode.data.polygons:
-            face.use_smooth = True
+        if bpy.app.version >= (4, 1, 0):
+            bpy.ops.object.shade_smooth()
+        else:
+            for face in optode.data.polygons:
+                face.use_smooth = True
         return optode
 
 
@@ -1692,11 +1687,6 @@ class NEUROCAPTAIN_OT_undefine_anchor_optode(bpy.types.Operator):
         self.report({'INFO'}, f"Removed anchor status from {len(selected_optodes)} optode(s)")
         return {'FINISHED'}
 
-import bpy
-import bmesh
-from mathutils import Vector, Matrix, Quaternion
-from mathutils.bvhtree import BVHTree
-import math
 
 class NEUROCAPTAIN_OT_rigid_rotate_optodes(bpy.types.Operator):
     """Rigidly rotate all optodes while maintaining surface constraints"""
@@ -1941,6 +1931,3 @@ def unregister():
     bpy.utils.unregister_class(NEUROCAPTAIN_OT_create_optode_connections_delaunay)
     bpy.utils.unregister_class(NEUROCAPTAIN_OT_create_optode_connections)
     bpy.utils.unregister_class(NEUROCAPTAIN_OT_rigid_rotate_optodes)
-
-if __name__ == "__main__":
-    register()

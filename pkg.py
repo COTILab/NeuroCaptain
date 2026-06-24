@@ -6,348 +6,160 @@ import pathlib
 from .dependencies import check_dependencies, show_error_message
 
 
-class InstallJData(bpy.types.Operator):
-    bl_idname = "blenderphotonics.install_jdata"
-    bl_label = "Install JData"
-    bl_description = "Install JData package for JSON/JMesh operations"
-    bl_options = {"REGISTER", "UNDO"}
+def _get_addon_dir():
+    """Return the modules directory next to the addon, creating it if needed."""
+    addon_dir = os.path.join(
+        os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
+        "modules",
+    )
+    if not os.path.exists(addon_dir):
+        os.makedirs(addon_dir)
+    return addon_dir
+
+
+def _pip_install(package, addon_dir):
+    """Run pip install for a single package into addon_dir. Returns (success, stderr)."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", package, "--target=" + addon_dir],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0, result.stderr
+
+
+def _make_installer(bl_idname, bl_label, bl_description, packages, prereqs=None):
+    """Create a Blender operator class that pip-installs the given packages.
+
+    prereqs: list of (condition_callable, package_name) tuples.
+             condition_callable() returns True if the prereq should be installed.
+    """
 
     def execute(self, context):
         try:
-            # Install JData
-            ADDON_DIR = os.path.join(
-                os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
-                "modules",
-            )
-            if not os.path.exists(ADDON_DIR):
-                os.makedirs(ADDON_DIR)
+            addon_dir = _get_addon_dir()
 
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "jdata",
-                    "--target=" + ADDON_DIR,
-                ],
-                capture_output=True,
-                text=True,
-            )
+            # Install prerequisites
+            if prereqs:
+                for condition_fn, prereq_pkg in prereqs:
+                    if condition_fn():
+                        ok, stderr = _pip_install(prereq_pkg, addon_dir)
+                        if not ok:
+                            show_error_message(
+                                f"Failed to install {prereq_pkg} (prerequisite): {stderr}",
+                                "Installation Failed",
+                            )
+                            return {"FINISHED"}
 
-            if result.returncode == 0:
-                # Update dependency status
-                check_dependencies()
-                show_error_message(
-                    "JData installed successfully! ",
-                    "Installation Complete",
-                )
-            else:
-                show_error_message(
-                    f"Failed to install JData: {result.stderr}", "Installation Failed"
-                )
-
-        except Exception as e:
-            show_error_message(
-                f"Error installing JData: {str(e)}", "Installation Error"
-            )
-
-        return {"FINISHED"}
-
-
-class InstallNumPy(bpy.types.Operator):
-    bl_idname = "blenderphotonics.install_numpy"
-    bl_label = "Install NumPy"
-    bl_description = "Install NumPy package for numerical operations"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        try:
-            # Install NumPy
-            ADDON_DIR = os.path.join(
-                os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
-                "modules",
-            )
-            if not os.path.exists(ADDON_DIR):
-                os.makedirs(ADDON_DIR)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "numpy",
-                    "--target=" + ADDON_DIR,
-                ],
-                capture_output=True,
-                text=True,
-            )
-
-            if result.returncode == 0:
-                # Update dependency status
-                check_dependencies()
-                show_error_message(
-                    "NumPy installed successfully! ",
-                    "Installation Complete",
-                )
-            else:
-                show_error_message(
-                    f"Failed to install NumPy: {result.stderr}", "Installation Failed"
-                )
-
-        except Exception as e:
-            show_error_message(
-                f"Error installing NumPy: {str(e)}", "Installation Error"
-            )
-
-        return {"FINISHED"}
-
-
-class InstallSciPy(bpy.types.Operator):
-    bl_idname = "blenderphotonics.install_scipy"
-    bl_label = "Install SciPy"
-    bl_description = "Install SciPy package for scientific computing operations"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        try:
-            # Install SciPy
-            ADDON_DIR = os.path.join(
-                os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
-                "modules",
-            )
-            if not os.path.exists(ADDON_DIR):
-                os.makedirs(ADDON_DIR)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "scipy",
-                    "--target=" + ADDON_DIR,
-                ],
-                capture_output=True,
-                text=True,
-            )
-
-            if result.returncode == 0:
-                # Update dependency status
-                check_dependencies()
-                show_error_message(
-                    "SciPy installed successfully! ",
-                    "Installation Complete",
-                )
-            else:
-                show_error_message(
-                    f"Failed to install SciPy: {result.stderr}", "Installation Failed"
-                )
-
-        except Exception as e:
-            show_error_message(
-                f"Error installing SciPy: {str(e)}", "Installation Error"
-            )
-
-        return {"FINISHED"}
-
-
-class InstallIso2Mesh(bpy.types.Operator):
-    bl_idname = "blenderphotonics.install_iso2mesh"
-    bl_label = "Install iso2mesh"
-    bl_description = "Install iso2mesh package for mesh generation operations"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        try:
-            # Install scipy first (required for iso2mesh)
-            ADDON_DIR = os.path.join(
-                os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
-                "modules",
-            )
-            if not os.path.exists(ADDON_DIR):
-                os.makedirs(ADDON_DIR)
-
-            # Install scipy first
-            scipy_result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "scipy",
-                    "--target=" + ADDON_DIR,
-                ],
-                capture_output=True,
-                text=True,
-            )
-
-            if scipy_result.returncode != 0:
-                show_error_message(
-                    f"Failed to install scipy (required for iso2mesh): {scipy_result.stderr}",
-                    "Installation Failed",
-                )
-                return {"FINISHED"}
-
-            # Install iso2mesh
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "pyiso2mesh",
-                    "--target=" + ADDON_DIR,
-                ],
-                capture_output=True,
-                text=True,
-            )
-
-            if result.returncode == 0:
-                # Update dependency status
-                check_dependencies()
-                show_error_message(
-                    "scipy and iso2mesh installed successfully! ",
-                    "Installation Complete",
-                )
-            else:
-                show_error_message(
-                    f"Failed to install iso2mesh: {result.stderr}",
-                    "Installation Failed",
-                )
-
-        except Exception as e:
-            show_error_message(
-                f"Error installing iso2mesh: {str(e)}", "Installation Error"
-            )
-
-        return {"FINISHED"}
-
-
-class InstallPMCX(bpy.types.Operator):
-    bl_idname = "blenderphotonics.install_pmcx"
-    bl_label = "Install pmcx"
-    bl_description = "Install pmcx package for Monte Carlo eXtreme simulations"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        try:
-            # Install pmcx
-            ADDON_DIR = os.path.join(
-                os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
-                "modules",
-            )
-            if not os.path.exists(ADDON_DIR):
-                os.makedirs(ADDON_DIR)
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "pmcx",
-                    "--target=" + ADDON_DIR,
-                ],
-                capture_output=True,
-                text=True,
-            )
-
-            if result.returncode == 0:
-                # Update dependency status
-                check_dependencies()
-                show_error_message(
-                    "pmcx installed successfully! ",
-                    "Installation Complete",
-                )
-            else:
-                show_error_message(
-                    f"Failed to install pmcx: {result.stderr}", "Installation Failed"
-                )
-
-        except Exception as e:
-            show_error_message(f"Error installing pmcx: {str(e)}", "Installation Error")
-
-        return {"FINISHED"}
-
-
-class InstallPMMC(bpy.types.Operator):
-    bl_idname = "blenderphotonics.install_pmmc"
-    bl_label = "Install pmmc"
-    bl_description = "Install pmmc package for Mesh-based Monte Carlo simulations"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        try:
-            # Install pmmc
-            ADDON_DIR = os.path.join(
-                os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
-                "modules",
-            )
-            if not os.path.exists(ADDON_DIR):
-                os.makedirs(ADDON_DIR)
-
-            # On Windows, install sparse_numba first (required for pmmc)
-            import platform
-
-            if platform.system() == "Windows":
-                sparse_numba_result = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "pip",
-                        "install",
-                        "sparse_numba",
-                        "--target=" + ADDON_DIR,
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-
-                if sparse_numba_result.returncode != 0:
+            # Install main packages
+            for pkg in packages:
+                ok, stderr = _pip_install(pkg, addon_dir)
+                if not ok:
                     show_error_message(
-                        f"Failed to install sparse_numba (required for pmmc on Windows): {sparse_numba_result.stderr}",
+                        f"Failed to install {pkg}: {stderr}",
                         "Installation Failed",
                     )
                     return {"FINISHED"}
 
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "pmmc",
-                    "--target=" + ADDON_DIR,
-                ],
-                capture_output=True,
-                text=True,
+            check_dependencies()
+
+            # Build success message listing all installed packages
+            all_pkgs = []
+            if prereqs:
+                for condition_fn, prereq_pkg in prereqs:
+                    if condition_fn():
+                        all_pkgs.append(prereq_pkg)
+            all_pkgs.extend(packages)
+            show_error_message(
+                f"{' and '.join(all_pkgs)} installed successfully! ",
+                "Installation Complete",
             )
 
-            if result.returncode == 0:
-                # Update dependency status
-                check_dependencies()
-                if platform.system() == "Windows":
-                    show_error_message(
-                        "sparse_numba and pmmc installed successfully! ",
-                        "Installation Complete",
-                    )
-                else:
-                    show_error_message(
-                        "pmmc installed successfully! ",
-                        "Installation Complete",
-                    )
-            else:
-                show_error_message(
-                    f"Failed to install pmmc: {result.stderr}", "Installation Failed"
-                )
-
         except Exception as e:
-            show_error_message(f"Error installing pmmc: {str(e)}", "Installation Error")
+            show_error_message(
+                f"Error installing {packages[0]}: {str(e)}", "Installation Error"
+            )
 
         return {"FINISHED"}
 
+    cls = type(
+        f"Install_{'_'.join(packages)}",  # class name (internal)
+        (bpy.types.Operator,),
+        {
+            "bl_idname": bl_idname,
+            "bl_label": bl_label,
+            "bl_description": bl_description,
+            "bl_options": {"REGISTER", "UNDO"},
+            "execute": execute,
+        },
+    )
+    return cls
+
+
+# ---------------------------------------------------------------------------
+# Condition helpers for prerequisites
+# ---------------------------------------------------------------------------
+
+def _is_windows():
+    import platform
+    return platform.system() == "Windows"
+
+
+def _always():
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Installer classes created via factory
+# ---------------------------------------------------------------------------
+
+InstallJData = _make_installer(
+    "blenderphotonics.install_jdata",
+    "Install JData",
+    "Install JData package for JSON/JMesh operations",
+    ["jdata"],
+)
+
+InstallNumPy = _make_installer(
+    "blenderphotonics.install_numpy",
+    "Install NumPy",
+    "Install NumPy package for numerical operations",
+    ["numpy"],
+)
+
+InstallSciPy = _make_installer(
+    "blenderphotonics.install_scipy",
+    "Install SciPy",
+    "Install SciPy package for scientific computing operations",
+    ["scipy"],
+)
+
+InstallIso2Mesh = _make_installer(
+    "blenderphotonics.install_iso2mesh",
+    "Install iso2mesh",
+    "Install iso2mesh package for mesh generation operations",
+    ["pyiso2mesh"],
+    prereqs=[(_always, "scipy")],
+)
+
+InstallPMCX = _make_installer(
+    "blenderphotonics.install_pmcx",
+    "Install pmcx",
+    "Install pmcx package for Monte Carlo eXtreme simulations",
+    ["pmcx"],
+)
+
+InstallPMMC = _make_installer(
+    "blenderphotonics.install_pmmc",
+    "Install pmmc",
+    "Install pmmc package for Mesh-based Monte Carlo simulations",
+    ["pmmc"],
+    prereqs=[(_is_windows, "sparse_numba")],
+)
+
+
+# ---------------------------------------------------------------------------
+# InstallAllDependencies -- kept as an explicit class (partial-failure report)
+# ---------------------------------------------------------------------------
 
 class InstallAllDependencies(bpy.types.Operator):
     bl_idname = "blenderphotonics.install_all_deps"
@@ -357,13 +169,7 @@ class InstallAllDependencies(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            # Install all dependencies
-            ADDON_DIR = os.path.join(
-                os.path.abspath(pathlib.Path(__file__).resolve().parent.parent),
-                "modules",
-            )
-            if not os.path.exists(ADDON_DIR):
-                os.makedirs(ADDON_DIR)
+            addon_dir = _get_addon_dir()
 
             import platform
 
@@ -378,19 +184,8 @@ class InstallAllDependencies(bpy.types.Operator):
             failed_packages = []
 
             for package in packages:
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "pip",
-                        "install",
-                        package,
-                        "--target=" + ADDON_DIR,
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode != 0:
+                ok, _stderr = _pip_install(package, addon_dir)
+                if not ok:
                     failed_packages.append(package)
 
             # Update dependency status
@@ -414,6 +209,10 @@ class InstallAllDependencies(bpy.types.Operator):
 
         return {"FINISHED"}
 
+
+# ---------------------------------------------------------------------------
+# CheckDependencies -- left as-is
+# ---------------------------------------------------------------------------
 
 class CheckDependencies(bpy.types.Operator):
     bl_idname = "blenderphotonics.check_deps"

@@ -1,8 +1,7 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import EnumProperty, StringProperty, CollectionProperty
+from bpy.props import EnumProperty
 import bmesh
-from bpy import context
 
 enum_action = [
     ("REFERENCE_POINT", "reference_point", "select Nz vertice, then press okay"),
@@ -85,8 +84,6 @@ class circumference_calc(Operator):
             vselect[2],
         )
 
-        pass
-
     @staticmethod
     def boolean_cut(context):
         head = bpy.data.objects["headcopy"]
@@ -97,11 +94,10 @@ class circumference_calc(Operator):
         bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
         bool_two.object = cube
         bool_two.operation = "DIFFERENCE"
-        bool_two.solver = "FAST"
+        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
         cube.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 2")
-        print("cube boolean complete")
         # make the face cut, switch to edit mode and delete faces created by the operation
 
     @staticmethod
@@ -119,14 +115,16 @@ class circumference_calc(Operator):
         for v in top_verts:
             for f in v.link_faces:
                 f.select_set(True)
+        translate_args = {
+            "value": (86.631, 151.812, 21.379),
+            "orient_type": "GLOBAL",
+            "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+        }
+        if bpy.app.version < (4, 0, 0):
+            translate_args["orient_axis_ortho"] = "X"
         bpy.ops.mesh.duplicate_move(
             MESH_OT_duplicate={"mode": 1},
-            TRANSFORM_OT_translate={
-                "value": (86.631, 151.812, 21.379),
-                "orient_axis_ortho": "X",
-                "orient_type": "GLOBAL",
-                "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-            },
+            TRANSFORM_OT_translate=translate_args,
         )
 
         bm = bmesh.from_edit_mesh(me)

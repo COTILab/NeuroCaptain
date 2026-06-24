@@ -1,8 +1,19 @@
+import os, sys
+_libs = os.path.join(os.path.dirname(__file__), "_libs")
+if os.path.isdir(_libs) and _libs not in sys.path:
+    sys.path.insert(0, _libs)
+    if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
+        os.add_dll_directory(_libs)
+
+_modules = os.path.join(os.path.dirname(os.path.dirname(__file__)), "modules")
+if os.path.isdir(_modules) and _modules not in sys.path:
+    sys.path.insert(0, _modules)
+
 import bpy
 from bpy.props import PointerProperty, BoolProperty
 from bpy.types import PropertyGroup
 from .file_import import file_import
-from .brain1020mesh import brain1020mesh
+from . import brain1020mesh as brain1020mesh_mod
 from .decimate_mesh import decimate_mesh
 from .shapes import insert_shape
 from .headmodels import select_model
@@ -19,11 +30,12 @@ from . import sd_probe_import
 from .dependencies import check_dependencies
 from . import optode_connect
 from . import landmark_labels
-from . import optodeJSON_manualSpring as optode_json  
-from .import optode_modules
+from . import optodeJSON_blenderGoal as optode_blender_goal
+from . import optode_modules
 from . import layered_mesh_manager
-from . import redbird_runner 
-from. import NeuroJSON_MeshLoader
+from . import redbird_runner
+from . import NeuroJSON_MeshLoader
+from . import probe_variability
 
 bl_info = {
     "name": "NeuroCaptain",
@@ -63,7 +75,7 @@ def register():
     bpy.utils.register_class(file_import)
     bpy.utils.register_class(decimate_mesh)
     bpy.utils.register_class(insert_shape)
-    bpy.utils.register_class(brain1020mesh)
+    brain1020mesh_mod.register()
     bpy.utils.register_class(select_model)
     bpy.utils.register_class(geo_nodes)
     bpy.utils.register_class(dual_mesh_NC)
@@ -76,7 +88,8 @@ def register():
     sd_probe_import.register()
     optode_connect.register()
     optode_modules.register()
-    optode_json.register()
+    optode_blender_goal.register()
+    probe_variability.register()
     ui.register()
     
     # Register scene properties
@@ -92,7 +105,8 @@ def unregister():
     del bpy.types.Scene.niifile
     
     ui.unregister()
-    optode_json.unregister()
+    probe_variability.unregister()
+    optode_blender_goal.unregister()
     optode_connect.unregister()
     sd_probe_import.unregister()
     landmark_labels.unregister()
@@ -105,7 +119,7 @@ def unregister():
     bpy.utils.unregister_class(dual_mesh_NC)
     bpy.utils.unregister_class(geo_nodes)
     bpy.utils.unregister_class(select_model)
-    bpy.utils.unregister_class(brain1020mesh)
+    brain1020mesh_mod.unregister()
     bpy.utils.unregister_class(insert_shape)
     bpy.utils.unregister_class(decimate_mesh)
     bpy.utils.unregister_class(file_import)

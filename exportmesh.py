@@ -4,15 +4,6 @@ import numpy as np
 import jdata as jd
 import os
 
-# from bpy_extras.io_utils import ImportHelper
-# from bpy.utils import register_class, unregister_class
-
-g_action = "export"
-
-
-class MatlabFunction:
-    pass
-
 
 class exportmesh(bpy.types.Operator):
     bl_idname = "braincapgen.export_mesh"
@@ -25,7 +16,6 @@ class exportmesh(bpy.types.Operator):
         outputdir = GetBPWorkFolder()
         if not os.path.isdir(outputdir):
             os.makedirs(outputdir)
-        print("the saved mesh directory is:", outputdir)
         obj = bpy.context.view_layer.objects.active
 
         bpy.ops.object.modifier_add(type="TRIANGULATE")
@@ -42,10 +32,8 @@ class exportmesh(bpy.types.Operator):
 
         v = np.array(verts)
 
-        print(len(faces))
         f = np.array(faces)
 
-        print([v.dtype, v.shape, f.dtype, f.shape])
         meshdata = {
             "_DataInfo_": {
                 "JMeshVersion": "0.5",
@@ -55,8 +43,6 @@ class exportmesh(bpy.types.Operator):
             "MeshTri3": f,
         }
         jd.save(meshdata, os.path.join(outputdir, self.filename))
-
-        print([v.dtype, v.shape, f.dtype, f.shape])
 
         return {"FINISHED"}
 

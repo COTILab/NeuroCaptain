@@ -7,8 +7,6 @@ from bpy.types import Operator
 from bpy.props import StringProperty
 from bpy_extras.io_utils import ImportHelper
 
-print(f"LOADING FROM: {__file__}", flush=True)
-
 def create_anchor_ring_material():
     mat_name = "Anchor_Ring_Material"
     if mat_name in bpy.data.materials:
@@ -55,20 +53,13 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             source_color       = (1.0, 0.0, 0.0, 1.0)
             detector_color     = (0.0, 0.0, 0.0, 1.0)
 
-            print("=" * 70, flush=True)
-            print("UPDATED CODE v32 — multi-atlas landmark lookup", flush=True)
-            print("fNIRS probe import from SD file", flush=True)
-            print("=" * 70, flush=True)
-
             sd_data = self.load_sd_file(sd_file_path)
 
-            print("\n2. Loading 3D landmarks", flush=True)
             if landmark_mesh_name not in bpy.data.objects:
                 self.report({'ERROR'}, f"'{landmark_mesh_name}' not found.")
                 return {'CANCELLED'}
             landmarks_3d = self.get_landmark_positions_with_labels(landmark_mesh_name)
 
-            print("\n3. Pairing anchors to landmarks", flush=True)
             anchors_3d, matched_labels = self.match_anchors_to_landmarks(
                 sd_data['anchor_labels'], landmarks_3d
             )
@@ -86,10 +77,8 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                 return {'CANCELLED'}
             head_mesh = bpy.data.objects[head_mesh_name]
 
-            print("\n4. Calculating optode size", flush=True)
             optode_diameter, optode_thickness = self.get_head_scale(head_mesh)
 
-            print("\n5. Registering probe", flush=True)
             all_positions_3d = self.register_with_springs(
                 sd_data['all_positions_2d'],
                 anchors_2d_matched,
@@ -111,11 +100,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             anchors_collection   = get_or_create_collection("Anchor Indicators")
             ring_mat             = create_anchor_ring_material()
 
-            print("\n" + "=" * 70, flush=True)
-            print(f"n_srcs: {n_srcs}, n_dets: {n_dets}, n_dummies: {len(dummy_pos_3d)}", flush=True)
-
-            print("\n6. Creating optodes...", flush=True)
-
             # Build set of source/detector indices directly connected to an anchor dummy
             anchor_adjacent = set()
             if sd_data['spring_list'] is not None:
@@ -126,7 +110,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                         anchor_adjacent.add(i2)
                     if i2 in anchor_set and i1 not in anchor_set and i1 < n_srcs + n_dets:
                         anchor_adjacent.add(i1)
-            print(f"   Anchor-adjacent optodes: {sorted(anchor_adjacent)}", flush=True)
             for i, pos in enumerate(src_pos_3d):
                 snapped_pos, normal = self.snap_to_mesh_surface(pos, head_mesh)
                 optode = self.create_optode_disc(snapped_pos, normal, f"Source_{i+1}",
@@ -169,15 +152,11 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             # Dummies used internally only — not shown in viewport
 
             # ── Connection mesh with spring type visualization ──────────
-            print("\n7. Creating connection mesh...", flush=True)
             self.create_connection_mesh(
                 context, src_pos_3d, det_pos_3d,
                 sd_data['spring_list'], n_srcs, n_dets
             )
 
-            print("\n" + "=" * 70, flush=True)
-            print("COMPLETE!", flush=True)
-            print("=" * 70, flush=True)
             self.report({'INFO'},
                 f"Created {len(src_pos_3d)} sources + {len(det_pos_3d)} detectors "
                 f"({len(matched_anchor_indices)} anchors)")
@@ -204,10 +183,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         spring_list = sd['SpringList'] if 'SpringList' in sd.dtype.names else None
         n_srcs = int(sd['nSrcs'][0, 0])
         n_dets = int(sd['nDets'][0, 0])
-
-        print(f"   Sources: {n_srcs}, Detectors: {n_dets}, Dummies: {len(dummy_pos)}", flush=True)
-        if spring_list is not None:
-            print(f"   Springs: {len(spring_list)}", flush=True)
 
         all_positions_2d = np.vstack([src_pos, det_pos, dummy_pos])
 
@@ -242,47 +217,51 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         stored_labels = landmark_obj.get("landmark_labels", None)
         if stored_labels is not None:
             landmark_labels = list(stored_labels)
-            print(f"   Using stored landmark labels ({len(landmark_labels)} labels)", flush=True)
-        elif num_landmarks >= 88:
-            landmark_labels = [
-                "Nz","Iz","Lpa","Rpa","Cz",
-                "T7","C5","C3","C1","Cz","C2","C4","C6","T8",
-                "Fpz","AFz","Fz","FCz","Cz","CPz","Pz","POz","Oz",
-                "FT7","F7","AF7","Fp1","TP7","P7","PO7","O1",
-                "FT8","F8","AF8","Fp2","TP8","P8","PO8","O2",
-                "FC1","FC3","FC5","FC2","FC4","FC6",
-                "F1","F3","F5","F2","F4","F6",
-                "","AF3","","","AF4","",
-                "CP1","CP3","CP5","CP2","CP4","CP6",
-                "P1","P3","P5","P2","P4","P6",
-                "","PO3","","","PO4","",
-                "FT9","F9","","","TP9","P9","PO9","O9",
-                "FT10","F10","","","TP10","P10","PO10","O10",
-            ]
-        elif num_landmarks >= 77:
-            landmark_labels = [
-                "Nz","Iz","Lpa","Rpa","Cz",
-                "T7","C5","C3","C1","Cz","C2","C4","C6","T8",
-                "Fpz","AFz","Fz","FCz","Cz","CPz","Pz","POz","Oz",
-                "FT7","F7","AF7","Fp1","TP7","P7","PO7","O1",
-                "FT8","F8","AF8","Fp2","TP8","P8","PO8","O2",
-                "FC1","FC3","FC5","FC2","FC4","FC6",
-                "F1","F3","F5","F2","F4","F6","AF3","AF4",
-                "CP1","CP3","CP5","CP2","CP4","CP6",
-                "P1","P3","P5","P2","P4","P6","PO3","PO4",
-                "FT9","F9","","","TP9","P9","PO9","O9",
-                "FT10","F10","","","TP10","P10","PO10","O10",
-            ]
-        elif num_landmarks >= 27:
-            landmark_labels = [
-                "Nz","Iz","Lpa","Rpa","Cz",
-                "T3","C3","Cz","C4","T4",
-                "Fpz","Fz","Cz","Pz","Oz",
-                "F7","Fp1","T5","O1","F8","Fp2","T6","O2",
-                "F3","F4","P3","P4",
-            ]
-        else:
-            landmark_labels = [f"Landmark_{i+1}" for i in range(num_landmarks)]
+            _standard_check = {"Nz", "Iz", "Cz", "C3", "C4", "Fpz", "Oz",
+                               "F7", "F8", "T7", "T8", "T3", "T4"}
+            if not any(lbl in _standard_check for lbl in landmark_labels):
+                stored_labels = None
+        if stored_labels is None:
+            if num_landmarks >= 88:
+                landmark_labels = [
+                    "Nz","Iz","Lpa","Rpa","Cz",
+                    "T7","C5","C3","C1","Cz","C2","C4","C6","T8",
+                    "Fpz","AFz","Fz","FCz","Cz","CPz","Pz","POz","Oz",
+                    "FT7","F7","AF7","Fp1","TP7","P7","PO7","O1",
+                    "FT8","F8","AF8","Fp2","TP8","P8","PO8","O2",
+                    "FC1","FC3","FC5","FC2","FC4","FC6",
+                    "F1","F3","F5","F2","F4","F6",
+                    "","AF3","","","AF4","",
+                    "CP1","CP3","CP5","CP2","CP4","CP6",
+                    "P1","P3","P5","P2","P4","P6",
+                    "","PO3","","","PO4","",
+                    "FT9","F9","","","TP9","P9","PO9","O9",
+                    "FT10","F10","","","TP10","P10","PO10","O10",
+                ]
+            elif num_landmarks >= 77:
+                landmark_labels = [
+                    "Nz","Iz","Lpa","Rpa","Cz",
+                    "T7","C5","C3","C1","Cz","C2","C4","C6","T8",
+                    "Fpz","AFz","Fz","FCz","Cz","CPz","Pz","POz","Oz",
+                    "FT7","F7","AF7","Fp1","TP7","P7","PO7","O1",
+                    "FT8","F8","AF8","Fp2","TP8","P8","PO8","O2",
+                    "FC1","FC3","FC5","FC2","FC4","FC6",
+                    "F1","F3","F5","F2","F4","F6","AF3","AF4",
+                    "CP1","CP3","CP5","CP2","CP4","CP6",
+                    "P1","P3","P5","P2","P4","P6","PO3","PO4",
+                    "FT9","F9","","","TP9","P9","PO9","O9",
+                    "FT10","F10","","","TP10","P10","PO10","O10",
+                ]
+            elif num_landmarks >= 27:
+                landmark_labels = [
+                    "Nz","Iz","Lpa","Rpa","Cz",
+                    "T3","C3","Cz","C4","T4",
+                    "Fpz","Fz","Cz","Pz","Oz",
+                    "F7","Fp1","T5","O1","F8","Fp2","T6","O2",
+                    "F3","F4","P3","P4",
+                ]
+            else:
+                landmark_labels = [f"Landmark_{i+1}" for i in range(num_landmarks)]
 
         # Build label→position dict
         landmarks_3d = {}
@@ -318,10 +297,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                 ref  = ref_units[lb]
                 best = int(np.argmax(unit_verts @ ref))
                 landmarks_3d[lb] = all_verts[best]
-                print(f"   Unit-vector fallback: {lb} → vertex {best} "
-                      f"({all_verts[best][0]:.1f}, "
-                      f"{all_verts[best][1]:.1f}, "
-                      f"{all_verts[best][2]:.1f})", flush=True)
 
         return landmarks_3d
 
@@ -333,7 +308,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                 matched_labels.append(label)
             else:
                 self.report({'WARNING'}, f"Anchor '{label}' not found in LandmarkMesh")
-        print(f"   Matched {len(anchors_3d)}/{len(anchor_labels)} anchors", flush=True)
         return np.array(anchors_3d, dtype=float), matched_labels
 
     # ------------------------------------------------------------------
@@ -357,14 +331,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         anc3d = anchors_3d.astype(float)
         n_anc = len(anchor_indices)
 
-        # K-means split on X coordinate — separates left/right SD patches
-        from scipy.cluster.vq import kmeans2
-        _, labels = kmeans2(anc2d[:, 0:1].astype(float), 2, seed=42, minit='points')
-        g0 = np.where(labels == 0)[0]
-        g1 = np.where(labels == 1)[0]
-        print(f"   Patch split: group0={len(g0)} anchors (x̄={anc2d[g0,0].mean():.0f}), "
-              f"group1={len(g1)} anchors (x̄={anc2d[g1,0].mean():.0f})", flush=True)
-
         def fit_affine(p1_2d, p2_3d):
             """pinv([p1,1]) * p2 per output dim — gen_xform_from_pts.m"""
             A = np.column_stack([p1_2d, np.ones(len(p1_2d))])
@@ -377,46 +343,51 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             pts_h = np.column_stack([pts_2d[:, :2], np.ones(len(pts_2d))])
             return (T @ pts_h.T).T
 
-        T0 = fit_affine(anc2d[g0], anc3d[g0])
-        T1 = fit_affine(anc2d[g1], anc3d[g1])
-
-        # Ensure patch0 maps to negative-X hemisphere (left) and patch1 to positive-X.
-        # K-means on 2D X splits the flat layout, but the flat layout is
-        # hemisphere-flipped — patch with lower 2D X may map to right hemisphere in 3D.
-        # Check 3D anchor X mean for each patch and swap if needed.
-        if anc3d[g0, 0].mean() > anc3d[g1, 0].mean():
-            T0, T1 = T1, T0
-            g0, g1 = g1, g0
-            print("   Swapped patches to correct hemisphere mapping", flush=True)
-
-        # Verify anchor fit quality per patch
-        e0 = np.linalg.norm(apply_affine(T0, anc2d[g0]) - anc3d[g0], axis=1).mean()
-        e1 = np.linalg.norm(apply_affine(T1, anc2d[g1]) - anc3d[g1], axis=1).mean()
-        print(f"   Patch0 affine anchor error: {e0:.2f} mm", flush=True)
-        print(f"   Patch1 affine anchor error: {e1:.2f} mm", flush=True)
-
-        # Assign each optode to nearest patch centroid in 2D
-        c0 = anc2d[g0].mean(axis=0)
-        c1 = anc2d[g1].mean(axis=0)
         anchor_set  = set(anchor_indices)
         anchor_list = list(anchor_indices)
         pos3d = np.zeros((n_points, 3), dtype=float)
 
-        n0 = n1 = 0
-        for i in range(n_points):
-            if i in anchor_set:
-                k = anchor_list.index(i)
-                pos3d[i] = anc3d[k]
-                continue
-            pt = all_positions_2d[i, :2].astype(float)
-            if np.linalg.norm(pt - c0) <= np.linalg.norm(pt - c1):
-                pos3d[i] = apply_affine(T0, pt.reshape(1, 2))[0]
-                n0 += 1
-            else:
-                pos3d[i] = apply_affine(T1, pt.reshape(1, 2))[0]
-                n1 += 1
+        # K-means split on X coordinate — separates left/right SD patches
+        from scipy.cluster.vq import kmeans2
+        _, labels = kmeans2(anc2d[:, 0:1].astype(float), 2, seed=42, minit='points')
+        g0 = np.where(labels == 0)[0]
+        g1 = np.where(labels == 1)[0]
+        # If either patch has < 2 anchors, a per-patch affine is degenerate.
+        # Fall back to a single global affine across all anchors.
+        if len(g0) < 2 or len(g1) < 2:
+            T_global = fit_affine(anc2d, anc3d)
+            for i in range(n_points):
+                if i in anchor_set:
+                    k = anchor_list.index(i)
+                    pos3d[i] = anc3d[k]
+                else:
+                    pos3d[i] = apply_affine(T_global, all_positions_2d[i:i+1, :2])[0]
+        else:
+            T0 = fit_affine(anc2d[g0], anc3d[g0])
+            T1 = fit_affine(anc2d[g1], anc3d[g1])
 
-        print(f"   Affine seed: {n0} in patch0, {n1} in patch1", flush=True)
+            # Ensure patch0 maps to negative-X hemisphere (left) and patch1 to positive-X.
+            if anc3d[g0, 0].mean() > anc3d[g1, 0].mean():
+                T0, T1 = T1, T0
+                g0, g1 = g1, g0
+
+            c0 = anc2d[g0].mean(axis=0)
+            c1 = anc2d[g1].mean(axis=0)
+
+            n0 = n1 = 0
+            for i in range(n_points):
+                if i in anchor_set:
+                    k = anchor_list.index(i)
+                    pos3d[i] = anc3d[k]
+                    continue
+                pt = all_positions_2d[i, :2].astype(float)
+                if np.linalg.norm(pt - c0) <= np.linalg.norm(pt - c1):
+                    pos3d[i] = apply_affine(T0, pt.reshape(1, 2))[0]
+                    n0 += 1
+                else:
+                    pos3d[i] = apply_affine(T1, pt.reshape(1, 2))[0]
+                    n1 += 1
+
         return pos3d
 
     # ------------------------------------------------------------------
@@ -465,7 +436,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             return positions
 
         # Initial surface placement
-        print("   Snapping seed to surface...", flush=True)
         positions = snap_to_surface(positions)
 
         # --- Parse springs ---
@@ -487,20 +457,14 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                     ks   = 1.0
                     ns  += 1
                 spring_data.append((i1, i2, rest, ks))
-            print(f"   Springs: {ns} stiff (k=1.0), {nf} flexible (k=1e-4)", flush=True)
 
         def total_energy():
             return sum(0.5 * ks * (np.linalg.norm(positions[i1] - positions[i2]) - rest) ** 2
                        for i1, i2, rest, ks in spring_data)
 
-        E0 = total_energy()
-        print(f"   Seed energy: {E0:.2f}", flush=True)
-
         N_ITER   = 400
         TOL      = 0.5
         E_window = []
-
-        print(f"   Running relaxation ({N_ITER} iters)...", flush=True)
 
         for it in range(N_ITER):
 
@@ -535,12 +499,9 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             if (it + 1) % 50 == 0:
                 E = total_energy()
                 E_window.append(E)
-                print(f"   Iter {it+1:4d}: energy={E:.2f}", flush=True)
                 if len(E_window) >= 2 and abs(E_window[-1] - E_window[-2]) < TOL:
-                    print(f"   Converged at iter {it+1}", flush=True)
                     break
 
-        print(f"   Final energy: {total_energy():.2f}", flush=True)
         return positions
 
     def create_connection_mesh(self, context, src_pos_3d, det_pos_3d,
@@ -568,7 +529,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         n_real = len(all_optodes)
 
         if n_real == 0:
-            print("   No optodes found for connection mesh", flush=True)
             return
 
         mesh    = bpy.data.meshes.new("Optode_Connections")
@@ -663,8 +623,7 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         sb.push       = 0.9
         sb.damping    = 0.5
 
-        print(f"   Connection mesh: {n_stiff} stiff springs (blue), "
-              f"{n_flex} flexible springs (orange)", flush=True)
+        print(f"Imported connection mesh: {n_stiff} stiff springs, {n_flex} flexible springs")
 
     # ------------------------------------------------------------------
     # Geometry helpers
@@ -703,8 +662,11 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             bsdf.inputs['Metallic'].default_value   = 0.3
             bsdf.inputs['Roughness'].default_value  = 0.4
         optode.data.materials.append(mat)
-        for face in optode.data.polygons:
-            face.use_smooth = True
+        if bpy.app.version >= (4, 1, 0):
+            bpy.ops.object.shade_smooth()
+        else:
+            for face in optode.data.polygons:
+                face.use_smooth = True
         return optode
 
 

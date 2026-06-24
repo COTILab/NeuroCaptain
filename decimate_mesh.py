@@ -13,10 +13,8 @@ class decimate_mesh(bpy.types.Operator):
             bpy.ops.object.mode_set(mode="OBJECT")
         except:
             pass
-        # decrease number of faces
         bpy.ops.object.select_all(action="DESELECT")
         head = bpy.data.objects["headmesh"]
-        # bpy.ops.object.select_all(action="DESELECT")
         head.select_set(True)
         bpy.context.view_layer.objects.active = head
         obj = bpy.context.object
@@ -26,7 +24,6 @@ class decimate_mesh(bpy.types.Operator):
         mod.ratio = self.number
 
         head = bpy.data.objects["headmesh"]
-        # bpy.ops.object.select_all(action="DESELECT")
         head.select_set(True)
         bpy.ops.object.modifier_apply(modifier="decimate")
 

@@ -368,7 +368,3 @@ def unregister():
     
     del bpy.types.Scene.neurocaptain_optode_modules
     del bpy.types.Scene.neurocaptain_optode_modules_index
-
-
-if __name__ == "__main__":
-    register()

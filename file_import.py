@@ -30,7 +30,6 @@ class file_import(Operator, ImportHelper):
     def func(self, context):
         bpy.ops.object.select_all(action="SELECT")
         for ob in bpy.context.selected_objects:
-            print(ob.type)
             if (
                 ob.type == "CAMERA"
                 or ob.type == "LIGHT"
@@ -57,20 +56,20 @@ class file_import(Operator, ImportHelper):
         for i in self.files:
             folder = os.path.dirname(self.filepath)
             path_to_file = os.path.join(folder, i.name)
-        print("folder is", folder)
-        print("pathis  is", path_to_file)
         root_ext = os.path.splitext(path_to_file)
         file_ex = root_ext[1]
-        print("file ext is ", file_ex)
         obs = []
         if file_ex == ".stl":
             path_to_file = os.path.join(folder, i.name)
-            bpy.ops.import_mesh.stl(
-                filepath=path_to_file,
-                axis_forward="-Z",
-                axis_up="Y",
-                filter_glob="*.obj;*.stl",
-            )
+            if bpy.app.version >= (4, 0, 0):
+                bpy.ops.wm.stl_import(filepath=path_to_file)
+            else:
+                bpy.ops.import_mesh.stl(
+                    filepath=path_to_file,
+                    axis_forward="-Z",
+                    axis_up="Y",
+                    filter_glob="*.obj;*.stl",
+                )
             obs.append(context.selected_objects[:])
             bpy.context.object.rotation_euler[0] = 4.71239
 
@@ -98,8 +97,6 @@ class file_import(Operator, ImportHelper):
         else:
             try:
                 surfdata = jd.load(self.filepath)
-                print("Loaded mesh data:", surfdata.keys() if hasattr(surfdata, 'keys') else type(surfdata))
-                
                 if "MeshVertex3" in surfdata and "MeshTri3" in surfdata:
                     AddMeshFromNodeFace(
                         surfdata["MeshVertex3"],
@@ -124,7 +121,7 @@ class file_import(Operator, ImportHelper):
         mod = bpy.data.objects["importedmodel"]
         bpy.ops.object.select_all(action="DESELECT")
         mod.select_set(True)
-        bpy.ops.object.origin_set(type="GEOMETRY_ORIGIN", center="MEDIAN")
+        bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="MEDIAN")
         bpy.ops.view3d.snap_selected_to_cursor(use_offset=False)
 
         print(

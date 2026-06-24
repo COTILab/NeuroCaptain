@@ -204,11 +204,10 @@ class cap_generation(Operator):
         bool_three = head.modifiers.new(type="BOOLEAN", name="bool 3")
         bool_three.object = ear
         bool_three.operation = "DIFFERENCE"
-        bool_three.solver = "FAST"
+        bool_three.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
         ear.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 3")
-        print("ear boolean complete")
 
         try:
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -217,18 +216,16 @@ class cap_generation(Operator):
         # decrease number of faces
         bpy.ops.object.select_all(action="DESELECT")
         head = bpy.data.objects["headmesh"]
-        # bpy.ops.object.select_all(action="DESELECT")
         head.select_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.mode_set(mode="OBJECT")
         bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
         bool_two.object = bottom
         bool_two.operation = "DIFFERENCE"
-        bool_two.solver = "FAST"
+        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
         bottom.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 2")
-        print("bottom boolean complete")
 
         bpy.ops.object.editmode_toggle()
         bpy.ops.mesh.delete(type="FACE")
@@ -237,11 +234,10 @@ class cap_generation(Operator):
         bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")
         bool_one.object = face
         bool_one.operation = "DIFFERENCE"
-        bool_one.solver = "FAST"
+        bool_one.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
         face.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 1")
-        print("face boolean complete")
 
         try:
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -250,7 +246,6 @@ class cap_generation(Operator):
         # decrease number of faces
         bpy.ops.object.select_all(action="DESELECT")
         head = bpy.data.objects["headmesh"]
-        # bpy.ops.object.select_all(action="DESELECT")
         head.select_set(True)
         bpy.context.view_layer.objects.active = head
 
@@ -260,12 +255,10 @@ class cap_generation(Operator):
         wire.use_boundary = True
         wire.use_crease = False
         bpy.ops.object.modifier_apply(modifier="wireframe")
-        print("wireframe complete")
 
         remesh = head.modifiers.new(type="REMESH", name="remesh")
         remesh.voxel_size = voxelsize
         bpy.ops.object.modifier_apply(modifier="remesh")
         bpy.context.view_layer.objects.active = head
-        print("remesh complete")
 
         return {"FINISHED"}

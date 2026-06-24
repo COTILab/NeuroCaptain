@@ -151,7 +151,10 @@ def create_mesh_object(name, vertices, faces, collection):
     bpy.ops.mesh.remove_doubles(threshold=0.0001)
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.shade_smooth()
+    if bpy.app.version >= (4, 1, 0):
+        bpy.ops.object.shade_smooth_by_angle()
+    else:
+        bpy.ops.object.shade_smooth()
     
     # move to target collection
     for c in list(obj.users_collection):
@@ -314,7 +317,8 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
     # Semi-transparent material
     mat_head = bpy.data.materials.new("HeadSurface_Mat")
     mat_head.use_nodes = True
-    mat_head.blend_method = 'BLEND'
+    if bpy.app.version < (4, 0, 0):
+        mat_head.blend_method = 'BLEND'
     nodes = mat_head.node_tree.nodes
     nodes.clear()
     bsdf = nodes.new('ShaderNodeBsdfPrincipled')

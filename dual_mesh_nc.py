@@ -2,6 +2,13 @@ import bpy
 from bpy.types import Operator
 
 
+def _get_interface_items(interface):
+    """Compat: items_tree (3.5-4.1) vs items (4.2+)."""
+    if hasattr(interface, 'items_tree'):
+        return interface.items_tree
+    return interface.items
+
+
 class dual_mesh_NC(Operator):
     bl_idname = "object.dual_mesh"
     bl_label = "Convert to Dual Mesh"
@@ -24,7 +31,7 @@ class dual_mesh_NC(Operator):
         # see if geometry socket is missing
         if not any(
             socket.name == "Geometry" and socket.in_out == "INPUT"
-            for socket in interface.items_tree
+            for socket in _get_interface_items(interface)
         ):
             new_input = interface.new_socket(
                 name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
@@ -33,7 +40,7 @@ class dual_mesh_NC(Operator):
         # make sure there is geometry socket
         if not any(
             socket.name == "Geometry" and socket.in_out == "OUTPUT"
-            for socket in interface.items_tree
+            for socket in _get_interface_items(interface)
         ):
             new_output = interface.new_socket(
                 name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry"
@@ -108,11 +115,11 @@ class dual_mesh_NC(Operator):
 
         if (major, minor) >= (3, 5):
             interface = node_tree.interface
-            if not any(s.name == "Geometry" and s.in_out == "INPUT" for s in interface.items_tree):
+            if not any(s.name == "Geometry" and s.in_out == "INPUT" for s in _get_interface_items(interface)):
                 interface.new_socket(
                     name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
                 )
-            if not any(s.name == "Geometry" and s.in_out == "OUTPUT" for s in interface.items_tree):
+            if not any(s.name == "Geometry" and s.in_out == "OUTPUT" for s in _get_interface_items(interface)):
                 interface.new_socket(
                     name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry"
                 )

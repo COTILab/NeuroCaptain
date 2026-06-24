@@ -1,7 +1,6 @@
 import bpy
 from bpy.props import EnumProperty
 from bpy.types import Operator
-from bpy.utils import register_class, unregister_class
 
 
 enum_action = [
@@ -73,14 +72,3 @@ class insert_shape(Operator):
         else:
             print("Please select a mesh object corresponding to the desired cutout geometry.")
 
-
-def register():
-    register_class(insert_shape)
-
-
-def unregister():
-    unregister_class(insert_shape)
-
-
-if __name__ == "__main__":
-    register()

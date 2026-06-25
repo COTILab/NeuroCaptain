@@ -1,7 +1,6 @@
 import bpy
 from bpy.props import EnumProperty
 from bpy.types import Operator
-from bpy.utils import register_class, unregister_class
 
 
 enum_action = [
@@ -52,11 +51,13 @@ class insert_shape(Operator):
         bpy.ops.mesh.primitive_cylinder_add()
         obj = bpy.context.selected_objects[0]
         obj.name = "cutout"
+
     @staticmethod
     def add_cube(context):
         bpy.ops.mesh.primitive_cube_add()
         obj = bpy.context.selected_objects[0]
         obj.name = "cutout"
+
     @staticmethod
     def add_triangle(context):
         bpy.ops.mesh.primitive_cylinder_add(vertices=3)
@@ -65,17 +66,9 @@ class insert_shape(Operator):
 
     @staticmethod
     def add_custom(context):
-        obj = bpy.context.selected_objects[0]
-        obj.name = "cutout"
+        if bpy.context.selected_objects:
+            obj = bpy.context.selected_objects[0]
+            obj.name = "cutout"
+        else:
+            print("Please select a mesh object corresponding to the desired cutout geometry.")
 
-
-def register():
-    register_class(insert_shape)
-
-
-def unregister():
-    unregister_class(insert_shape)
-
-
-if __name__ == "__main__":
-    register()

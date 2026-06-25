@@ -1,25 +1,4 @@
-"""NIIFile - panel file browser properties
-
-* Authors: (c) 2021-2022 Qianqian Fang <q.fang at neu.edu>
-           (c) 2021      Yuxuan Zhang <zhang.yuxuan1 at northeastern.edu>
-* License: GNU General Public License V3 or later (GPLv3)
-* Website: http://mcx.space/bp
-
-To cite this work, please use the below information
-
-@article{BlenderPhotonics2022,
-  author = {Yuxuan Zhang and Qianqian Fang},
-  title = {{BlenderPhotonics: an integrated open-source software environment for three-dimensional meshing and photon simulations in complex tissues}},
-  volume = {27},
-  journal = {Journal of Biomedical Optics},
-  number = {8},
-  publisher = {SPIE},
-  pages = {1 -- 23},
-  year = {2022},
-  doi = {10.1117/1.JBO.27.8.083014},
-  URL = {https://doi.org/10.1117/1.JBO.27.8.083014}
-}
-"""
+"""NeuroCaptain NII file browser properties."""
 
 import bpy
 from bpy.props import StringProperty, EnumProperty

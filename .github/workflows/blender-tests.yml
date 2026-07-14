@@ -1,0 +1,51 @@
+name: Blender Add-on Tests
+
+on:
+  push:
+  pull_request:
+    branches: [master]
+
+jobs:
+  smoke-test:
+    # run_mmc's pmmc call still needs an OpenCL device even in "CPU mode"
+    # (use_gpu=False just skips requiring a specific gpuid); on a GPU-less,
+    # OpenCL-runtime-less runner this could hang rather than fail cleanly.
+    # Bound the damage instead of running toward GitHub's 6-hour default.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # 3.6 and 4.2 are the current Blender LTS releases; 5.0 is latest stable.
+        # dual_mesh_NC hard-requires Blender >= 3.4.0, so nothing older belongs here.
+        blender-version: ["3.6", "4.2", "5.0"]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Git Bash is preinstalled on windows-latest runners, so this one
+        # shell works identically across all three OSes below.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Blender ${{ matrix.blender-version }}
+        uses: bradyajohnston/setup-blender@v5
+        with:
+          version: ${{ matrix.blender-version }}
+
+      - name: Locate Blender's bundled Python
+        run: |
+          BLENDER_PY=$(blender --background --python-expr "import sys; print(sys.executable)" | tail -1)
+          echo "BLENDER_PY=$BLENDER_PY" >> "$GITHUB_ENV"
+
+      - name: Install add-on's Python dependencies into Blender's Python
+        run: |
+          "$BLENDER_PY" -m ensurepip --upgrade
+          "$BLENDER_PY" -m pip install --upgrade pip
+          "$BLENDER_PY" -m pip install numpy scipy jdata iso2mesh pmmc redbirdpy
+          # bjdata's C extension is optional; force a pure-Python install so no
+          # OS-specific compiler toolchain is required to load .bmsh files.
+          PYBJDATA_NO_EXTENSION=1 "$BLENDER_PY" -m pip install bjdata
+
+      - name: Run test suite inside headless Blender
+        run: blender --background --factory-startup --python-exit-code 1 --python tests/run_tests.py

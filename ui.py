@@ -165,6 +165,148 @@ class NEUROCAPTAIN_OT_import_layered_mesh(bpy.types.Operator):
             return {'CANCELLED'}
 
 
+# ── Flexible (N-layer) mesh import ──────────────────────────────────────────
+
+_LAYER_ROLE_ITEMS = [
+    ('scalp',        "Scalp",        ""),
+    ('skull',        "Skull",        ""),
+    ('csf',          "CSF",          ""),
+    ('gray_matter',  "Gray Matter",  ""),
+    ('white_matter', "White Matter", ""),
+    ('other',        "Other",        ""),
+    ('custom',       "Custom...",    ""),
+]
+_MAX_FLEXIBLE_LAYERS = 8
+
+
+class NEUROCAPTAIN_OT_import_layered_mesh_flexible(bpy.types.Operator):
+    """Import a layered head model with any number of tissue layers (fewer
+    than the standard 5, or more). Looks for layer names in the mesh file or
+    a sidecar JSON; prompts you to define them if none are found"""
+    bl_idname = "neurocaptain.import_layered_mesh_flexible"
+    bl_label  = "Import Layered Mesh (Any Layer Count)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepath:    bpy.props.StringProperty(subtype="FILE_PATH")
+    filter_glob: bpy.props.StringProperty(default="*.mat;*.jmsh;*.bmsh;*.json", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        if not self.filepath:
+            self.report({'ERROR'}, "No file selected")
+            return {'CANCELLED'}
+        if not lmm.ISO2MESH_AVAILABLE:
+            self.report({'ERROR'}, "Missing dependency: iso2mesh")
+            return {'CANCELLED'}
+
+        try:
+            source = lmm.load_layered_mesh_source(self.filepath)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to read mesh: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        if source['layer_definitions'] is not None:
+            try:
+                result = lmm.import_layered_head_model_flexible(
+                    self.filepath, reference_obj_name='headmesh',
+                    layer_definitions=source['layer_definitions'],
+                )
+                self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+                return {'FINISHED'} if result['success'] else {'CANCELLED'}
+            except Exception as e:
+                self.report({'ERROR'}, f"Import failed: {e}")
+                import traceback; traceback.print_exc()
+                return {'CANCELLED'}
+
+        # No layer names found anywhere in/around the file -> ask the user
+        num_layers = len(source['unique_labels'])
+        if num_layers > _MAX_FLEXIBLE_LAYERS:
+            self.report({'ERROR'}, f"{num_layers} layers detected, exceeds the {_MAX_FLEXIBLE_LAYERS} supported by the naming prompt")
+            return {'CANCELLED'}
+
+        bpy.ops.neurocaptain.define_layers(
+            'INVOKE_DEFAULT',
+            mesh_path=self.filepath,
+            reference_obj_name='headmesh',
+            label_ids=",".join(str(i) for i in source['unique_labels']),
+        )
+        return {'FINISHED'}
+
+
+class NEUROCAPTAIN_OT_define_layers(bpy.types.Operator):
+    """Assign a name and tissue role to each detected layer, then import"""
+    bl_idname = "neurocaptain.define_layers"
+    bl_label  = "Define Mesh Layers"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    mesh_path:          bpy.props.StringProperty(subtype="FILE_PATH", options={'HIDDEN'})
+    reference_obj_name: bpy.props.StringProperty(default="headmesh", options={'HIDDEN'})
+    label_ids:          bpy.props.StringProperty(options={'HIDDEN'})  # comma-separated tissue label ids
+
+    __annotations__ = dict(__annotations__)
+    for _i in range(_MAX_FLEXIBLE_LAYERS):
+        __annotations__[f'name_{_i}'] = bpy.props.StringProperty(name="Name", default="")
+        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(name="Role", items=_LAYER_ROLE_ITEMS, default='other')
+        __annotations__[f'custom_{_i}'] = bpy.props.StringProperty(name="Custom Role", default="")
+    del _i
+
+    def _label_ids(self):
+        return [int(x) for x in self.label_ids.split(',') if x]
+
+    def invoke(self, context, event):
+        # Pre-fill names/roles from default guesses so the user only edits what's wrong
+        for i, label_id in enumerate(self._label_ids()):
+            setattr(self, f'name_{i}', f"Layer {label_id}")
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        ids = self._label_ids()
+        layout.label(text=f"No layer names found — detected {len(ids)} tissue label(s):", icon='INFO')
+        for i, label_id in enumerate(ids):
+            box = layout.box()
+            row = box.row(align=True)
+            row.label(text=f"Tissue {label_id}:")
+            row.prop(self, f'name_{i}', text="")
+            row2 = box.row(align=True)
+            row2.prop(self, f'role_{i}', text="Role")
+            if getattr(self, f'role_{i}') == 'custom':
+                row2.prop(self, f'custom_{i}', text="")
+
+    def execute(self, context):
+        role_labels = {identifier: label for identifier, label, _ in _LAYER_ROLE_ITEMS}
+        layer_definitions = {}
+        for i, label_id in enumerate(self._label_ids()):
+            role = getattr(self, f'role_{i}')
+            name = getattr(self, f'name_{i}').strip()
+            if role == 'custom':
+                custom = getattr(self, f'custom_{i}').strip()
+                role_key = custom.lower().replace(' ', '_') if custom else 'other'
+                if not name:
+                    name = custom or f"Layer {label_id}"
+            else:
+                role_key = role
+                if not name:
+                    name = role_labels[role] if role != 'other' else f"Layer {label_id}"
+            layer_definitions[label_id] = {'name': name, 'role': role_key}
+
+        try:
+            result = lmm.import_layered_head_model_flexible(
+                self.mesh_path, reference_obj_name=self.reference_obj_name,
+                layer_definitions=layer_definitions,
+            )
+            self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+            return {'FINISHED'} if result['success'] else {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
 # ============================================================================
 # MMC OPERATORS
 # ============================================================================
@@ -736,6 +878,8 @@ class NEUROCAPTAIN_PT_lightsim_subpanel(bpy.types.Panel):
             row.operator("neurocaptain.import_layered_mesh", text="Load Different", icon="FILE_REFRESH")
         else:
             layout.operator("neurocaptain.import_layered_mesh", text="From File (.mat)", icon="IMPORT")
+        layout.operator("neurocaptain.import_layered_mesh_flexible",
+                         text="From File (any layer count)", icon="IMPORT")
 
         layout.separator()
         njloader.draw_neurojson_browser(layout, context)
@@ -811,7 +955,7 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
             if len(missing) > 3:
                 box.label(text=f"• ... and {len(missing) - 3} more")
             from .pkg import (InstallJData, InstallNumPy, InstallSciPy,
-                               InstallIso2Mesh, InstallPMMC,
+                               InstallIso2Mesh, InstallPMMC, InstallRedbird,
                                InstallAllDependencies, CheckDependencies)
             row = box.row()
             row.operator(InstallAllDependencies.bl_idname, text="Install All", icon="IMPORT")
@@ -823,6 +967,7 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
             row = box.row()
             row.operator(InstallIso2Mesh.bl_idname, text="iso2mesh", icon="FILE_TICK")
             row.operator(InstallPMMC.bl_idname,     text="pmmc",     icon="FILE_TICK")
+            row.operator(InstallRedbird.bl_idname,  text="redbirdpy", icon="FILE_TICK")
         else:
             from .pkg import CheckDependencies
             box.operator(CheckDependencies.bl_idname,
@@ -842,6 +987,8 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
 CLASSES = [
     NeuroCaptainSettings,
     NEUROCAPTAIN_OT_import_layered_mesh,
+    NEUROCAPTAIN_OT_import_layered_mesh_flexible,
+    NEUROCAPTAIN_OT_define_layers,
     NEUROCAPTAIN_OT_setup_mmc,
     NEUROCAPTAIN_OT_run_mmc,
     NEUROCAPTAIN_OT_setup_redbird,
@@ -866,15 +1013,11 @@ def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.neurocaptain_settings = bpy.props.PointerProperty(type=NeuroCaptainSettings)
-    bpy.types.Scene.neurocaptain_selected_action = bpy.props.StringProperty(
-        name="Selected Action", default=""
-    )
 
 
 def unregister():
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.neurocaptain_settings
-    del bpy.types.Scene.neurocaptain_selected_action
     schematic_2d.unregister()
     njloader.unregister()

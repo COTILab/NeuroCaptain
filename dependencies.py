@@ -20,6 +20,7 @@ DEPENDENCIES = {
     "pmcx": False,
     "pmmc": False,
     "scipy": False,
+    "redbirdpy": False,
 }
 
 # Error messages for missing dependencies
@@ -30,6 +31,7 @@ MISSING_MESSAGES = {
     "pmcx": "pmcx package is required for Monte Carlo eXtreme simulations",
     "pmmc": "pmmc package is required for Mesh-based Monte Carlo simulations",
     "scipy": "scipy package is required for spatial operations",
+    "redbirdpy": "redbirdpy package is required for FEM diffuse optical forward simulations",
 }
 
 

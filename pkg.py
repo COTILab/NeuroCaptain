@@ -137,7 +137,7 @@ InstallIso2Mesh = _make_installer(
     "blenderphotonics.install_iso2mesh",
     "Install iso2mesh",
     "Install iso2mesh package for mesh generation operations",
-    ["pyiso2mesh"],
+    ["iso2mesh"],
     prereqs=[(_always, "scipy")],
 )
 
@@ -154,6 +154,13 @@ InstallPMMC = _make_installer(
     "Install pmmc package for Mesh-based Monte Carlo simulations",
     ["pmmc"],
     prereqs=[(_is_windows, "sparse_numba")],
+)
+
+InstallRedbird = _make_installer(
+    "blenderphotonics.install_redbirdpy",
+    "Install redbirdpy",
+    "Install redbirdpy package for FEM diffuse optical forward simulations",
+    ["redbirdpy"],
 )
 
 
@@ -173,13 +180,14 @@ class InstallAllDependencies(bpy.types.Operator):
 
             import platform
 
-            packages = ["jdata", "numpy", "scipy", "pyiso2mesh", "pmcx"]
+            packages = ["jdata", "numpy", "scipy", "iso2mesh", "pmcx"]
 
             # Add Windows-specific dependency for pmmc
             if platform.system() == "Windows":
                 packages.append("sparse_numba")
 
             packages.append("pmmc")
+            packages.append("redbirdpy")
 
             failed_packages = []
 

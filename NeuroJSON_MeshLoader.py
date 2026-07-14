@@ -58,7 +58,18 @@ def _patch_and_check_deps():
         # refs (e.g. "url.bmsh:$.MeshNode._ArrayZipData_"). jdata tries to
         # pass the dict directly to zlib.decompress(), which crashes.
         # Fix: walk the data and resolve _DataLink_ refs before jdata decodes.
-        _orig_decode = _jd.jdatadecode
+        #
+        # Must capture the real decode() dispatch/recursion function here,
+        # NOT jdatadecode (a one-line alias: `def jdatadecode(obj, **kwargs):
+        # return decode(obj, **kwargs)`). jdatadecode has no recursion logic
+        # of its own - it just looks up `decode` by name on every call. Once
+        # _jd.decode is reassigned below, that lookup permanently resolves to
+        # the patched wrapper, so capturing the alias as "_orig_decode" would
+        # make it call straight back into the patched wrapper on the exact
+        # same object forever (infinite recursion on every input, not just
+        # large ones). Capturing the real decode() function object directly
+        # means _orig_decode(data) actually runs its dispatch/recursion body.
+        _orig_decode = _jd.decode
 
         def _resolve_datalinks_in_zip(obj):
             """Pre-resolve _DataLink_ refs nested inside _ArrayZipData_ fields."""
@@ -75,9 +86,24 @@ def _patch_and_check_deps():
                     if isinstance(item, (dict, list)):
                         _resolve_datalinks_in_zip(item)
 
+        # jdata's own decode recurses into nested structures by looking up
+        # jdatadecode/decode through the module namespace, which the patch
+        # below reassigns globally - so every nested recursive call would
+        # re-enter _patched_decode and re-run a full _resolve_datalinks_in_zip
+        # scan over its (sub)subtree, compounding into a RecursionError well
+        # before jdata finishes decoding any mesh of realistic size. Only run
+        # the resolve pass once, on the outermost call, over the whole tree.
+        _resolving_datalinks = [False]
+
         def _patched_decode(data, **kwargs):
-            _resolve_datalinks_in_zip(data)
-            return _orig_decode(data, **kwargs)
+            if _resolving_datalinks[0]:
+                return _orig_decode(data, **kwargs)
+            _resolving_datalinks[0] = True
+            try:
+                _resolve_datalinks_in_zip(data)
+                return _orig_decode(data, **kwargs)
+            finally:
+                _resolving_datalinks[0] = False
 
         _jd.jdatadecode = _patched_decode
         _jd.decode = _patched_decode

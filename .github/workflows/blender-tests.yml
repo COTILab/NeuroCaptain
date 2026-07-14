@@ -35,7 +35,11 @@ jobs:
 
       - name: Locate Blender's bundled Python
         run: |
-          BLENDER_PY=$(blender --background --python-expr "import sys; print(sys.executable)" | tail -1)
+          # Blender prints its own console output (including a trailing
+          # "Blender quit" line) alongside our print() on --background exit,
+          # so `tail -1` isn't reliable - it can grab that shutdown message
+          # instead of the real path. Tag our line and extract only that.
+          BLENDER_PY=$(blender --background --python-expr "import sys; print('BLENDER_PY_PATH:' + sys.executable)" | grep '^BLENDER_PY_PATH:' | sed 's/^BLENDER_PY_PATH://')
           echo "BLENDER_PY=$BLENDER_PY" >> "$GITHUB_ENV"
 
       - name: Install add-on's Python dependencies into Blender's Python

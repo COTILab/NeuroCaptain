@@ -39,8 +39,6 @@ VIEW_3D area, and setting space.shading.type is a plain property write with
 no poll() restriction. So no temp_override is needed anywhere in this file.
 """
 
-import contextlib
-import io
 import os
 import tempfile
 import unittest
@@ -238,20 +236,19 @@ class LightSimulationTest(unittest.TestCase):
         # unlike the forward solve and Jacobian above (which already ran
         # successfully by this point, proving the mesh/optode coupling and
         # computation work), "no valid sensitivity" here is purely a sparse
-        # test-data artifact, not a NeuroCaptain bug, so it's accepted -
-        # confirmed via the specific printed reason, so an unrelated
-        # regression still fails this test.
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
+        # test-data artifact, not a NeuroCaptain bug, so it's accepted.
+        # bpy.ops raises RuntimeError (not a plain {'CANCELLED'} return) when
+        # an operator does self.report({'ERROR'}, ...) and cancels - the
+        # exception's own message already carries that report text, so check
+        # it directly rather than the (never-reached) return value; any
+        # other reason still fails this test.
+        try:
             result = bpy.ops.neurocaptain.run_redbird()
-        output = captured.getvalue()
-        print(output, end="")
-
-        if result != {"FINISHED"}:
+        except RuntimeError as exc:
             self.assertIn(
                 "No valid sensitivity",
-                output,
-                f"run_redbird failed for a reason other than sparse SD pairs:\n{output}",
+                str(exc),
+                f"run_redbird failed for a reason other than sparse SD pairs: {exc}",
             )
         else:
             self.assertEqual(result, {"FINISHED"})

@@ -35,11 +35,16 @@ jobs:
 
       - name: Locate Blender's bundled Python
         run: |
-          # Blender prints its own console output (including a trailing
-          # "Blender quit" line) alongside our print() on --background exit,
-          # so `tail -1` isn't reliable - it can grab that shutdown message
-          # instead of the real path. Tag our line and extract only that.
-          BLENDER_PY=$(blender --background --python-expr "import sys; print('BLENDER_PY_PATH:' + sys.executable)" | grep '^BLENDER_PY_PATH:' | sed 's/^BLENDER_PY_PATH://')
+          # Don't parse Blender's stdout: Blender's own C-level console
+          # output (e.g. its trailing "Blender quit" shutdown message) and
+          # our Python print() go through separate stdio buffers into the
+          # same pipe, and can interleave mid-line under --background,
+          # producing a corrupted single line. Have Python write the path
+          # straight to a file instead, sidestepping stdout entirely.
+          BLENDER_PY_FILE="$RUNNER_TEMP/blender_py_path.txt"
+          rm -f "$BLENDER_PY_FILE"
+          blender --background --python-expr "import sys, os; open(os.path.join(os.environ['RUNNER_TEMP'], 'blender_py_path.txt'), 'w').write(sys.executable)"
+          BLENDER_PY=$(cat "$BLENDER_PY_FILE")
           echo "BLENDER_PY=$BLENDER_PY" >> "$GITHUB_ENV"
 
       - name: Install add-on's Python dependencies into Blender's Python

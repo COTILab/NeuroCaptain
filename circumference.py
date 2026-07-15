@@ -94,7 +94,7 @@ class circumference_calc(Operator):
         bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
         bool_two.object = cube
         bool_two.operation = "DIFFERENCE"
-        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
+        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
         cube.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 2")

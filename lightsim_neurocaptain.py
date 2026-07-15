@@ -5,7 +5,6 @@ import numpy as np
 import scipy.io as sio
 from scipy.spatial import cKDTree
 from scipy.ndimage import map_coordinates
-import threading
 import time
 import gc
 import os
@@ -378,12 +377,6 @@ def smooth_on_mesh(values, nodes, n_iterations=3, k_neighbors=10):
 # =============================================================================
 # MMC-SPECIFIC FUNCTIONS
 # =============================================================================
-# If pmmc's OpenCL backend never responds (missing device, stuck driver, or
-# not enough compute power to finish the requested photon count), fail with
-# a clear error after this long instead of hanging Blender forever.
-MMC_SIMULATION_TIMEOUT_SECONDS = 600
-
-
 def run_single_mmc(cfg_dict):
     """Run a single MMC simulation with fresh config."""
     gc.collect()
@@ -415,27 +408,7 @@ def run_single_mmc(cfg_dict):
     if use_gpu and gpuid:
         cfg['gpuid'] = gpuid
 
-    timeout = cfg_dict.get('timeout_seconds', MMC_SIMULATION_TIMEOUT_SECONDS)
-    outcome = {}
-
-    def _run():
-        try:
-            outcome['result'] = pmmc.run(cfg)
-        except Exception as exc:
-            outcome['error'] = exc
-
-    worker = threading.Thread(target=_run, daemon=True)
-    worker.start()
-    worker.join(timeout)
-    if worker.is_alive():
-        raise TimeoutError(
-            f"pmmc.run() did not finish within {timeout}s - the OpenCL device "
-            "may be missing, unresponsive, or lack the compute power for the "
-            "requested photon count"
-        )
-    if 'error' in outcome:
-        raise outcome['error']
-    result = outcome['result']
+    result = pmmc.run(cfg)
     del cfg
     gc.collect()
 

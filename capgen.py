@@ -204,7 +204,7 @@ class cap_generation(Operator):
         bool_three = head.modifiers.new(type="BOOLEAN", name="bool 3")
         bool_three.object = ear
         bool_three.operation = "DIFFERENCE"
-        bool_three.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
+        bool_three.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
         ear.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 3")
@@ -222,7 +222,7 @@ class cap_generation(Operator):
         bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
         bool_two.object = bottom
         bool_two.operation = "DIFFERENCE"
-        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
+        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
         bottom.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 2")
@@ -234,7 +234,7 @@ class cap_generation(Operator):
         bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")
         bool_one.object = face
         bool_one.operation = "DIFFERENCE"
-        bool_one.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
+        bool_one.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
         face.hide_set(True)
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 1")

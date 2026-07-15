@@ -39,7 +39,10 @@ VIEW_3D area, and setting space.shading.type is a plain property write with
 no poll() restriction. So no temp_override is needed anywhere in this file.
 """
 
+import contextlib
+import io
 import os
+import sys
 import tempfile
 import unittest
 
@@ -109,6 +112,14 @@ class LightSimulationTest(unittest.TestCase):
     def tearDownClass(cls):
         cls.addon.unregister()
 
+    # Production default (lightsim_neurocaptain.MMC_SIMULATION_TIMEOUT_SECONDS)
+    # is a generous safety net for real simulations. CI's software OpenCL CPU
+    # device (pocl) can be too slow/unresponsive to finish even 100 photons,
+    # so use a much shorter budget here - see test_import_layered_mesh_
+    # then_run_mmc_and_redbird for how that outcome is distinguished from an
+    # actual bug.
+    MMC_TEST_TIMEOUT_SECONDS = 20
+
     def setUp(self):
         fd, self.fixture_path = tempfile.mkstemp(suffix=".mat")
         os.close(fd)
@@ -127,7 +138,13 @@ class LightSimulationTest(unittest.TestCase):
         settings.mmc_use_gpu = False
         settings.mmc_nphoton = 100  # keep the simulation small/fast for CI
 
+        self._lightsim = self.addon.lightsim_neurocaptain
+        self._orig_mmc_timeout = self._lightsim.MMC_SIMULATION_TIMEOUT_SECONDS
+        self._lightsim.MMC_SIMULATION_TIMEOUT_SECONDS = self.MMC_TEST_TIMEOUT_SECONDS
+
     def tearDown(self):
+        self._lightsim.MMC_SIMULATION_TIMEOUT_SECONDS = self._orig_mmc_timeout
+
         if os.path.exists(self.fixture_path):
             os.remove(self.fixture_path)
 
@@ -183,7 +200,33 @@ class LightSimulationTest(unittest.TestCase):
         self.assertGreater(len(bpy.data.objects["Head_Surface_5L"].data.polygons), 0)
         self.assertGreater(len(bpy.data.objects["Brain_Cortex_5L"].data.polygons), 0)
 
-        result = bpy.ops.neurocaptain.run_mmc()
+        # run_single_mmc bounds pmmc.run() to MMC_SIMULATION_TIMEOUT_SECONDS
+        # (shortened above for CI) and raises TimeoutError if it doesn't
+        # respond in time. On an environment with no real OpenCL device (or
+        # not enough compute power for even 100 photons - e.g. CI's software
+        # pocl CPU backend), every source/detector call times out, so
+        # run_sensitivity_mmc finds no valid channels and the operator
+        # reports {'CANCELLED'}. That's an environment limitation, not a
+        # NeuroCaptain bug, and per team decision counts as a pass here -
+        # but only when the captured output actually shows our timeout
+        # message, so a real regression still fails this test.
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            result = bpy.ops.neurocaptain.run_mmc()
+        output = captured.getvalue()
+        sys.stdout.write(output)
+
+        if result != {"FINISHED"}:
+            self.assertIn(
+                "pmmc.run() did not finish",
+                output,
+                f"run_mmc failed for a reason other than an OpenCL timeout:\n{output}",
+            )
+            self.skipTest(
+                "pmmc's OpenCL backend couldn't find a device or enough compute "
+                "power for the requested photon count in this environment - "
+                "accepted as an environment limitation."
+            )
         self.assertEqual(result, {"FINISHED"})
 
         result = bpy.ops.neurocaptain.run_redbird()

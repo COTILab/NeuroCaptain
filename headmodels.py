@@ -259,68 +259,23 @@ class select_model(Operator, ImportHelper):
         head.name = "headmesh"
         head.select_set(True)
 
-        if bpy.app.version >= (4, 0, 0):
-            bpy.ops.object.duplicate_move(
-                OBJECT_OT_duplicate={"linked": False, "mode": "TRANSLATION"},
-                TRANSFORM_OT_translate={
-                    "value": (0.212906, 0.0140968, 0.0237914),
-                    "orient_type": "GLOBAL",
-                    "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                    "orient_matrix_type": "GLOBAL",
-                    "constraint_axis": (False, False, False),
-                    "mirror": False,
-                    "use_proportional_edit": False,
-                    "proportional_edit_falloff": "SMOOTH",
-                    "proportional_size": 1,
-                    "use_proportional_connected": False,
-                    "use_proportional_projected": False,
-                    "snap": False,
-                    "cursor_transform": False,
-                    "texture_space": False,
-                    "remove_on_cancel": False,
-                    "view2d_edge_pan": False,
-                    "release_confirm": False,
-                    "use_accurate": False,
-                    "use_automerge_and_split": False,
-                },
-            )
-        else:
-            bpy.ops.object.duplicate_move(
-                OBJECT_OT_duplicate={"linked": False, "mode": "TRANSLATION"},
-                TRANSFORM_OT_translate={
-                    "value": (0.212906, 0.0140968, 0.0237914),
-                    # "orient_axis_ortho": "X",
-                    "orient_type": "GLOBAL",
-                    "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                    "orient_matrix_type": "GLOBAL",
-                    "constraint_axis": (False, False, False),
-                    "mirror": False,
-                    "use_proportional_edit": False,
-                    "proportional_edit_falloff": "SMOOTH",
-                    "proportional_size": 1,
-                    "use_proportional_connected": False,
-                    "use_proportional_projected": False,
-                    "snap": False,
-                    "snap_elements": {"INCREMENT"},
-                    "use_snap_project": False,
-                    "snap_target": "CLOSEST",
-                    "use_snap_self": True,
-                    "use_snap_edit": True,
-                    "use_snap_nonedit": True,
-                    "use_snap_selectable": False,
-                    "snap_point": (0, 0, 0),
-                    "snap_align": False,
-                    "snap_normal": (0, 0, 0),
-                    "gpencil_strokes": False,
-                    "cursor_transform": False,
-                    "texture_space": False,
-                    "remove_on_cancel": False,
-                    "view2d_edge_pan": False,
-                    "release_confirm": False,
-                    "use_accurate": False,
-                    "use_automerge_and_split": False,
-                },
-            )
+        # Duplicate + offset without bpy.ops.object.duplicate_move(): its
+        # TRANSFORM_OT_translate stage activates a modal gizmo-drawing
+        # callback (ED_region_draw_cb_activate) that requires a real
+        # GPU-initialized viewport region, which crashes with a native
+        # EXCEPTION_ACCESS_VIOLATION/SIGSEGV under `blender --background`
+        # (confirmed on both 3.4 and 4.2 - not a Python exception, so
+        # temp_override can't help). Doing the duplicate and translate
+        # directly via bpy.data has the same effect and has no viewport
+        # dependency at all, so it works in the interactive UI, headless
+        # scripting, and CI alike.
+        dup = head.copy()
+        dup.data = head.data.copy()
+        for collection in head.users_collection:
+            collection.objects.link(dup)
+        offset = (0.212906, 0.0140968, 0.0237914)
+        dup.location = tuple(loc + off for loc, off in zip(dup.location, offset))
+
         ob = bpy.context.scene.objects["headmesh.001"]
         bpy.ops.object.select_all(action="DESELECT")
         bpy.context.view_layer.objects.active = ob  # Make the cube the active object

@@ -24,18 +24,17 @@ bpy.ops.view3d.snap_selected_to_cursor(), which fails in plain
 a temp_override supplying a VIEW_3D area/region (verified empirically -
 the default factory-startup screen does have one even headless).
 
-add_headmesh() also calls bpy.ops.object.duplicate_move(...) (a macro
+add_headmesh() used to call bpy.ops.object.duplicate_move(...) (a macro
 combining OBJECT_OT_duplicate + TRANSFORM_OT_translate) to create the
-hidden headmesh.001 duplicate. On Blender 3.4, this crashes the whole
-process with a native EXCEPTION_ACCESS_VIOLATION inside Blender's transform/
-gizmo machinery (ED_region_draw_cb_activate expects a real, GPU-initialized
+hidden headmesh.001 duplicate. That crashed the whole process with a native
+EXCEPTION_ACCESS_VIOLATION/SIGSEGV inside Blender's transform/gizmo
+machinery (ED_region_draw_cb_activate expects a real, GPU-initialized
 viewport region that plain `--background` mode doesn't have) - reproduced
 directly, isolated to this exact call, and confirmed it is NOT a Python
-exception (temp_override can't fix a native crash). The identical call
-succeeds cleanly on Blender 5.0. This test is skipped below 4.0 - matching
-the same cutoff the product code already uses elsewhere for Blender 4.0's
-UI-era changes - since 4.2's exact behavior here hasn't been confirmed
-locally; the real CI run against actual 4.2 is the final word.
+exception (temp_override can't fix a native crash). CI confirmed it on both
+3.4 and 4.2. add_headmesh() now duplicates via bpy.data (obj.copy()) and
+sets .location directly instead, which has no viewport dependency and no
+longer crashes on any version, so this test no longer needs a version skip.
 """
 
 import os
@@ -100,13 +99,6 @@ class CapGenerationPipelineTest(unittest.TestCase):
     def _export_dir(self):
         return self.addon.utils.GetBPWorkFolder()
 
-    @unittest.skipIf(
-        bpy.app.version < (4, 0, 0),
-        "select_model's add_headmesh() calls bpy.ops.object.duplicate_move(), which "
-        "crashes Blender 3.x headlessly with a native EXCEPTION_ACCESS_VIOLATION in "
-        "the transform/gizmo code (needs a real GPU-initialized viewport region that "
-        "--background mode doesn't provide) - confirmed on 3.4, fixed by 5.0.",
-    )
     def test_full_pipeline_produces_a_valid_cap_mesh(self):
         self.assertIsNotNone(
             self.view3d_area, "no VIEW_3D area found in factory-startup screen"

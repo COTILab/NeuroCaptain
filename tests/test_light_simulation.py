@@ -69,6 +69,11 @@ def _fibonacci_shell(radius, n_points):
     return np.stack([x, y, z], axis=1)
 
 
+def _tet_volumes(node, tets):
+    v0, v1, v2, v3 = (node[tets[:, i]] for i in range(4))
+    return np.abs(np.einsum("ij,ij->i", v1 - v0, np.cross(v2 - v0, v3 - v0))) / 6.0
+
+
 def build_layered_sphere_mesh():
     """Return (node[N,3] float64, elem[M,5] int32) for a synthetic 5-layer solid ball."""
     shells = [
@@ -78,6 +83,11 @@ def build_layered_sphere_mesh():
     node = np.vstack(shells + [np.zeros((1, 3))]).astype(np.float64)
 
     tets = Delaunay(node).simplices.astype(np.int64)
+    # A handful of tets from this shell-sampled point set come out nearly
+    # coplanar (near-zero volume) - redbirdpy's mesh-quality check correctly
+    # rejects those as degenerate, so drop them here rather than feed it a
+    # mesh no real iso2mesh output would ever produce.
+    tets = tets[_tet_volumes(node, tets) > (MAX_RADIUS ** 3) * 1e-6]
     centroid_radius = np.linalg.norm(node[tets].mean(axis=1), axis=1)
 
     # np.digitize's band_index INCREASES with radius (0=innermost, N_SHELLS-1=

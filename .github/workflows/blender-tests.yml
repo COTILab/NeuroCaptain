@@ -8,9 +8,11 @@ on:
 jobs:
   smoke-test:
     # run_mmc's pmmc call still needs an OpenCL device even in "CPU mode"
-    # (use_gpu=False just skips requiring a specific gpuid); on a GPU-less,
-    # OpenCL-runtime-less runner this could hang rather than fail cleanly.
-    # Bound the damage instead of running toward GitHub's 6-hour default.
+    # (use_gpu=False just skips requiring a specific gpuid) - MMC has no
+    # non-OpenCL compute path. The "Install a CPU OpenCL runtime" step below
+    # gives every runner a real device, but keep this as a safety net so a
+    # regression hangs for 20 minutes instead of running toward GitHub's
+    # 6-hour default.
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -27,6 +29,27 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install a CPU OpenCL runtime
+        # pmmc (MMC) only has an OpenCL compute backend, even for its "CPU"
+        # path (mmc_use_gpu=False just skips picking a specific gpuid) - with
+        # no OpenCL platform registered at all, GitHub-hosted runners have
+        # nothing to enumerate and pmmc.run() hangs/crashes instead of
+        # failing cleanly. Install a real CPU ICD per OS so there's an
+        # actual device for it to bind to.
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get update
+              sudo apt-get install -y pocl-opencl-icd
+              ;;
+            macOS)
+              brew install pocl
+              ;;
+            Windows)
+              choco install opencl-intel-cpu-runtime -y
+              ;;
+          esac
 
       - name: Install Blender ${{ matrix.blender-version }}
         uses: bradyajohnston/setup-blender@v5

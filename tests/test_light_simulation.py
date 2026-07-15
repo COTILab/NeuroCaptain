@@ -52,9 +52,17 @@ from _addon_helpers import import_addon, register_addon
 
 N_SHELLS = 5
 POINTS_PER_SHELL = 60
-# Matches the synthetic headmesh's radius below so optode positions actually
-# land in/near the volumetric mesh's coordinate space, not 10x outside it.
-MAX_RADIUS = 0.1
+# Coordinates throughout this addon are millimeters (a real head model spans
+# roughly 0-200mm per axis, ~150mm radius from centroid - verified against
+# HeadModels/Colin27_Atlas_scalp.bmsh), and project_into_mesh's MIN_DEPTH=2.0
+# .. 25.0 search range and sd_max_distance's 60.0mm default / the 10.0mm
+# minimum SD distance in run_sensitivity_mmc are all mm-scale constants. A
+# radius of 0.1 here previously made the whole fixture ~1500x smaller than
+# any of those thresholds, so source/detector projection could never find a
+# containing element and every SD pair failed the 10.0mm minimum - this
+# realistic head-scale radius (also used for the optode-placement UV sphere
+# below, so the two stay in the same coordinate space) fixes both.
+MAX_RADIUS = 90.0
 # outer -> inner: 1=Scalp, 2=Skull, 3=CSF, 4=Gray Matter, 5=White Matter
 LAYER_LABELS_OUTER_TO_INNER = [1, 2, 3, 4, 5]
 
@@ -132,7 +140,7 @@ class LightSimulationTest(unittest.TestCase):
         os.close(fd)
         write_layered_mesh_fixture(self.fixture_path)
 
-        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.1)
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=MAX_RADIUS)
         self.head = bpy.context.active_object
         self.head.name = "headmesh"
 

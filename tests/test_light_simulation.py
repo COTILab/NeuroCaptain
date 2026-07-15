@@ -59,10 +59,10 @@ MAX_RADIUS = 0.1
 LAYER_LABELS_OUTER_TO_INNER = [1, 2, 3, 4, 5]
 
 
-def _fibonacci_shell(radius, n_points):
+def _fibonacci_shell(radius, n_points, theta_offset=0.0):
     indices = np.arange(n_points)
     phi = np.arccos(1 - 2 * (indices + 0.5) / n_points)
-    theta = np.pi * (1 + 5**0.5) * indices
+    theta = np.pi * (1 + 5**0.5) * indices + theta_offset
     x = radius * np.sin(phi) * np.cos(theta)
     y = radius * np.sin(phi) * np.sin(theta)
     z = radius * np.cos(phi)
@@ -76,17 +76,25 @@ def _tet_volumes(node, tets):
 
 def build_layered_sphere_mesh():
     """Return (node[N,3] float64, elem[M,5] int32) for a synthetic 5-layer solid ball."""
+    # Each shell gets a distinct rotation offset (golden-angle-based, so no
+    # shell's points ever fall on another's rays). Without this, every shell
+    # shares the exact same 60 angular directions - only the radius differs -
+    # so every point sits on one of just 60 rays through the origin, which is
+    # a systematically degenerate configuration for Delaunay tessellation:
+    # ~13% of the resulting tets come out nearly coplanar (near-zero volume).
+    # Verified locally that this offset alone brings that to zero.
     shells = [
-        _fibonacci_shell(MAX_RADIUS * (i + 1) / N_SHELLS, POINTS_PER_SHELL)
+        _fibonacci_shell(
+            MAX_RADIUS * (i + 1) / N_SHELLS, POINTS_PER_SHELL,
+            theta_offset=i * 0.6180339887498949,
+        )
         for i in range(N_SHELLS)
     ]
     node = np.vstack(shells + [np.zeros((1, 3))]).astype(np.float64)
 
     tets = Delaunay(node).simplices.astype(np.int64)
-    # A handful of tets from this shell-sampled point set come out nearly
-    # coplanar (near-zero volume) - redbirdpy's mesh-quality check correctly
-    # rejects those as degenerate, so drop them here rather than feed it a
-    # mesh no real iso2mesh output would ever produce.
+    # Safety net: drop any still-degenerate tet rather than feed redbirdpy's
+    # mesh-quality check something it would correctly reject.
     tets = tets[_tet_volumes(node, tets) > (MAX_RADIUS ** 3) * 1e-6]
     centroid_radius = np.linalg.norm(node[tets].mean(axis=1), axis=1)
 

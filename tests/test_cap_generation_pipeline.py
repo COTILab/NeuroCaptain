@@ -125,6 +125,28 @@ def _bbox_diagonal(vertices):
     return sum((maxs[axis] - mins[axis]) ** 2 for axis in range(3)) ** 0.5
 
 
+def _log_head_dimensions(head, stage):
+    """Print headmesh's bounding-box dimensions/vert/face counts at a named
+    pipeline stage. decimate_mesh.py/geo_nodes.py/capgen.py print nothing
+    themselves, so a mid-pipeline size collapse (seen on macOS CI: the final
+    export ended up an implausible 8.9mm across, instead of ~150-200mm) is
+    otherwise invisible until the very last assertion - this narrows a repeat
+    failure down to the exact stage that collapsed the mesh."""
+    dims = tuple(round(d, 2) for d in head.dimensions)
+    print(
+        f"[cap-gen diagnostic] {stage}: dimensions={dims}mm "
+        f"verts={len(head.data.vertices)} faces={len(head.data.polygons)}"
+    )
+
+
+# A genuine head-sized mesh should never collapse below this in any
+# dimension mid-pipeline; this is deliberately looser than the final
+# MIN_PLAUSIBLE_HEAD_BBOX_DIAGONAL_MM check so it can localize *which* stage
+# a collapse happens at without being so tight it flags legitimate
+# intermediate shapes (e.g. a single cutout cube before the boolean cut).
+MIN_PLAUSIBLE_STAGE_DIMENSION_MM = 50.0
+
+
 class CapGenerationPipelineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -200,10 +222,12 @@ class CapGenerationPipelineTest(unittest.TestCase):
         self.assertIsNotNone(landmark_obj)
 
         nz_world = self._landmark_world_position(landmark_obj, "Nz")
+        print(f"[cap-gen diagnostic] Nz landmark world position: {tuple(round(c, 2) for c in nz_world)}")
 
         # --- circle cutout + project onto the head surface -----------------
         pre_cutout_vert_count = len(head.data.vertices)
         pre_cutout_face_count = len(head.data.polygons)
+        _log_head_dimensions(head, "before insert_shape/geo_nodes")
 
         result = bpy.ops.braincapgen.insert_shape(action="ADD_CYLINDER")
         self.assertEqual(result, {"FINISHED"})
@@ -217,6 +241,12 @@ class CapGenerationPipelineTest(unittest.TestCase):
             (len(head.data.vertices), len(head.data.polygons)),
             (pre_cutout_vert_count, pre_cutout_face_count),
             "geo_nodes() should have carved cutouts into headmesh, not left it unchanged",
+        )
+        _log_head_dimensions(head, "after geo_nodes")
+        self.assertGreater(
+            max(head.dimensions), MIN_PLAUSIBLE_STAGE_DIMENSION_MM,
+            f"headmesh collapsed to an implausibly small size after geo_nodes(): "
+            f"dimensions={tuple(head.dimensions)}",
         )
 
         # --- head density -----------------------------------------------
@@ -233,24 +263,52 @@ class CapGenerationPipelineTest(unittest.TestCase):
             post_decimate_face_count, pre_decimate_face_count,
             "decimate_mesh(0.05) should actually reduce the face count",
         )
+        _log_head_dimensions(head, "after decimate_mesh(0.05)")
+        self.assertGreater(
+            max(head.dimensions), MIN_PLAUSIBLE_STAGE_DIMENSION_MM,
+            f"headmesh collapsed to an implausibly small size after decimate_mesh(): "
+            f"dimensions={tuple(head.dimensions)}",
+        )
 
         # --- choose the reference vertex closest to Nz --------------------
         # Scriptable equivalent of manually clicking the vertex nearest the
         # Nz landmark in the viewport, done on the now-decimated headmesh
         # (matches the real workflow: density is set before the reference
         # point is picked).
-        select_nearest_vertex(head, nz_world)
+        nearest_index = select_nearest_vertex(head, nz_world)
+        nearest_world = head.matrix_world @ head.data.vertices[nearest_index].co
+        nz_pick_distance = (nearest_world - nz_world).length
+        print(
+            f"[cap-gen diagnostic] nearest headmesh vertex to Nz: "
+            f"{tuple(round(c, 2) for c in nearest_world)} (distance={nz_pick_distance:.2f}mm)"
+        )
+        self.assertLess(
+            nz_pick_distance, 30.0,
+            f"nearest headmesh vertex to the Nz landmark is {nz_pick_distance:.1f}mm "
+            f"away - the landmark set and head model may not be co-registered",
+        )
 
         result = bpy.ops.braincapgen.cap_generation(action="PLACE_CUTOUTS", add_cylinder=True)
         self.assertEqual(result, {"FINISHED"})
         for name in ("face_cutout", "bottom_cutout", "ear_cutout"):
-            self.assertIsNotNone(bpy.data.objects.get(name), f"{name} was not created")
+            cutout_obj = bpy.data.objects.get(name)
+            self.assertIsNotNone(cutout_obj, f"{name} was not created")
+            print(
+                f"[cap-gen diagnostic] {name}: location={tuple(round(c, 2) for c in cutout_obj.location)} "
+                f"scale={tuple(round(c, 2) for c in cutout_obj.scale)}"
+            )
 
         result = bpy.ops.braincapgen.cap_generation(action="BOOLEAN_CUT", thick=2, voxel=0.5)
         self.assertEqual(result, {"FINISHED"})
         head = bpy.data.objects["headmesh"]
         self.assertGreater(len(head.data.vertices), 0)
         self.assertGreater(len(head.data.polygons), 0)
+        _log_head_dimensions(head, "after cap_generation(BOOLEAN_CUT)")
+        self.assertGreater(
+            max(head.dimensions), MIN_PLAUSIBLE_STAGE_DIMENSION_MM,
+            f"cap mesh collapsed to an implausibly small size after BOOLEAN_CUT: "
+            f"dimensions={tuple(head.dimensions)}",
+        )
 
         non_manifold_ratio = _non_manifold_edge_ratio(head)
         self.assertLess(
@@ -267,6 +325,7 @@ class CapGenerationPipelineTest(unittest.TestCase):
             len(head.data.polygons), 20,
             "dual mesh conversion produced an implausibly low polygon count",
         )
+        _log_head_dimensions(head, "after dual_mesh()")
 
         bpy.context.view_layer.objects.active = head
         result = bpy.ops.braincapgen.export_mesh(filename=self.export_filename)

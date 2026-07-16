@@ -136,6 +136,9 @@ class circumference_calc(Operator):
         # print(edge_lengths)
         circ = sum(edge_lengths)
         circ = round(circ, 3)
+        # Stashed so callers (and tests) can read the computed circumference
+        # instead of parsing it back out of the console print below.
+        context.scene["last_circumference_mm"] = circ
         unit = bpy.context.scene.unit_settings.length_unit
         print("The estimated circumfrence is: ", circ, unit)  # default unit in blender is meter
         print("NOTE: the units are defined in blender scene properties")

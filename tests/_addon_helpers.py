@@ -36,6 +36,35 @@ def register_addon(addon):
     addon.register()
 
 
+def select_nearest_vertex(obj, world_pos):
+    """Select (object mode) only the mesh vertex on `obj` nearest to a given
+    world-space position.
+
+    Scriptable equivalent of manually clicking the vertex closest to some
+    reference point (e.g. a landmark) in the viewport. Matches the plain
+    object-mode `vertex.select = True` pattern already used by
+    test_optode_features.py's `_select_only_vertex`, which several operators
+    in this add-on read directly (no edit-mode round-trip required).
+    """
+    from mathutils import Vector
+
+    target = Vector(world_pos)
+    inv = obj.matrix_world.inverted()
+    local_target = inv @ target
+
+    nearest_index = None
+    nearest_dist = None
+    for vert in obj.data.vertices:
+        vert.select = False
+        dist = (vert.co - local_target).length
+        if nearest_dist is None or dist < nearest_dist:
+            nearest_dist = dist
+            nearest_index = vert.index
+
+    obj.data.vertices[nearest_index].select = True
+    return nearest_index
+
+
 def get_view3d_area_and_region():
     """Find a VIEW_3D area/region in the current screen.
 

@@ -1,0 +1,1011 @@
+{
+  "format": "NeuroCaptain Probe Configuration",
+  "version": "2.0",
+  "metadata": {
+    "num_sources": 9,
+    "num_detectors": 8,
+    "num_connections": 39,
+    "num_anchors": 2,
+    "num_landmarks": 83
+  },
+  "optodes": [
+    {
+      "name": "Detector_1",
+      "position": [
+        -10.522323608398438,
+        23.273090362548828,
+        87.31869506835938
+      ],
+      "type": "detector",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 10,
+        "vertex_indices": [
+          17,
+          4,
+          8
+        ],
+        "vertex_labels": [
+          "FCz",
+          "Cz",
+          "C1"
+        ],
+        "barycentric_coords": [
+          0.7031296722728575,
+          0.007446822260076674,
+          0.28942350546706586
+        ],
+        "distance_to_surface": 2.1773011684417725,
+        "nearest_landmark": {
+          "landmark": "FCz",
+          "landmark_index": 17,
+          "offset": [
+            -10.271272659301758,
+            -9.165557861328125,
+            1.7092361450195312
+          ],
+          "distance": 13.871841294500554
+        }
+      }
+    },
+    {
+      "name": "Detector_2",
+      "position": [
+        -33.61417007446289,
+        40.43206787109375,
+        71.38667297363281
+      ],
+      "type": "detector",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 122,
+        "vertex_indices": [
+          39,
+          45,
+          40
+        ],
+        "vertex_labels": [
+          "FC1",
+          "F1",
+          "FC3"
+        ],
+        "barycentric_coords": [
+          0.6096469980386173,
+          0.2436933467020366,
+          0.14665965525934607
+        ],
+        "distance_to_surface": 1.3049856424331665,
+        "nearest_landmark": {
+          "landmark": "FC1",
+          "landmark_index": 39,
+          "offset": [
+            -2.88299560546875,
+            7.7775115966796875,
+            -5.3090057373046875
+          ],
+          "distance": 9.848192211729641
+        }
+      }
+    },
+    {
+      "name": "Detector_3",
+      "position": [
+        -11.960770606994629,
+        43.77203369140625,
+        79.91844177246094
+      ],
+      "type": "detector",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 58,
+        "vertex_indices": [
+          45,
+          17,
+          39
+        ],
+        "vertex_labels": [
+          "F1",
+          "FCz",
+          "FC1"
+        ],
+        "barycentric_coords": [
+          0.33451901255828986,
+          0.576163184300833,
+          0.08931780314087712
+        ],
+        "distance_to_surface": 2.832751750946045,
+        "nearest_landmark": {
+          "landmark": "FCz",
+          "landmark_index": 17,
+          "offset": [
+            -11.70971965789795,
+            11.333385467529297,
+            -5.691017150878906
+          ],
+          "distance": 17.26125278262654
+        }
+      }
+    },
+    {
+      "name": "Detector_4",
+      "position": [
+        -33.113059997558594,
+        19.7133731842041,
+        80.06483459472656
+      ],
+      "type": "detector",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 26,
+        "vertex_indices": [
+          39,
+          8,
+          7
+        ],
+        "vertex_labels": [
+          "FC1",
+          "C1",
+          "C3"
+        ],
+        "barycentric_coords": [
+          0.5960388707728909,
+          0.3847974624004069,
+          0.019163666826702248
+        ],
+        "distance_to_surface": 0.9816690683364868,
+        "nearest_landmark": {
+          "landmark": "FC1",
+          "landmark_index": 39,
+          "offset": [
+            -2.381885528564453,
+            -12.941183090209961,
+            3.3691558837890625
+          ],
+          "distance": 13.583033632509924
+        }
+      }
+    },
+    {
+      "name": "Detector_5",
+      "position": [
+        -52.379520416259766,
+        15.145299911499023,
+        66.28277587890625
+      ],
+      "type": "detector",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 28,
+        "vertex_indices": [
+          39,
+          7,
+          40
+        ],
+        "vertex_labels": [
+          "FC1",
+          "C3",
+          "FC3"
+        ],
+        "barycentric_coords": [
+          0.2747702147946235,
+          0.5608619607328079,
+          0.1643678244725686
+        ],
+        "distance_to_surface": 1.2734017372131348,
+        "nearest_landmark": {
+          "landmark": "C3",
+          "landmark_index": 7,
+          "offset": [
+            8.524608612060547,
+            14.193913459777832,
+            3.770824432373047
+          ],
+          "distance": 16.981026130691657
+        }
+      }
+    },
+    {
+      "name": "Detector_6",
+      "position": [
+        -52.786659240722656,
+        33.89189147949219,
+        57.27174377441406
+      ],
+      "type": "detector",
+      "is_anchor": true,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 122,
+        "vertex_indices": [
+          39,
+          45,
+          40
+        ],
+        "vertex_labels": [
+          "FC1",
+          "F1",
+          "FC3"
+        ],
+        "barycentric_coords": [
+          0.02356016419425999,
+          0.05045835944945752,
+          0.9259814763562825
+        ],
+        "distance_to_surface": 0.4153956174850464,
+        "nearest_landmark": {
+          "landmark": "FC3",
+          "landmark_index": 40,
+          "offset": [
+            1.8069305419921875,
+            1.7209053039550781,
+            1.1476249694824219
+          ],
+          "distance": 2.746553472073742
+        }
+      }
+    },
+    {
+      "name": "Detector_7",
+      "position": [
+        8.599217414855957,
+        45.52023696899414,
+        79.89633178710938
+      ],
+      "type": "detector",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 55,
+        "vertex_indices": [
+          16,
+          48,
+          17
+        ],
+        "vertex_labels": [
+          "Fz",
+          "F2",
+          "FCz"
+        ],
+        "barycentric_coords": [
+          0.09030617565467713,
+          0.3128384661849032,
+          0.5968553581604197
+        ],
+        "distance_to_surface": 2.6932435035705566,
+        "nearest_landmark": {
+          "landmark": "FCz",
+          "landmark_index": 17,
+          "offset": [
+            8.850268363952637,
+            13.081588745117188,
+            -5.713127136230469
+          ],
+          "distance": 16.795684800673772
+        }
+      }
+    },
+    {
+      "name": "Detector_8",
+      "position": [
+        7.868462562561035,
+        25.42401885986328,
+        86.93408966064453
+      ],
+      "type": "detector",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 34,
+        "vertex_indices": [
+          42,
+          10,
+          17
+        ],
+        "vertex_labels": [
+          "FC2",
+          "C2",
+          "FCz"
+        ],
+        "barycentric_coords": [
+          0.010460512726080395,
+          0.21927637645026987,
+          0.7702631108236497
+        ],
+        "distance_to_surface": 1.69601571559906,
+        "nearest_landmark": {
+          "landmark": "FCz",
+          "landmark_index": 17,
+          "offset": [
+            8.119513511657715,
+            -7.014629364013672,
+            1.3246307373046875
+          ],
+          "distance": 10.811390737181426
+        }
+      }
+    },
+    {
+      "name": "Source_1",
+      "position": [
+        1.6604771614074707,
+        14.218820571899414,
+        90.23564147949219
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 12,
+        "vertex_indices": [
+          10,
+          4,
+          17
+        ],
+        "vertex_labels": [
+          "C2",
+          "Cz",
+          "FCz"
+        ],
+        "barycentric_coords": [
+          0.05262657186064562,
+          0.5003926862350245,
+          0.44698074190432985
+        ],
+        "distance_to_surface": 0.9451999068260193,
+        "nearest_landmark": {
+          "landmark": "Cz",
+          "landmark_index": 4,
+          "offset": [
+            2.0703375339508057,
+            15.043134689331055,
+            -2.9139938354492188
+          ],
+          "distance": 15.462003604627473
+        }
+      }
+    },
+    {
+      "name": "Source_2",
+      "position": [
+        -22.14300537109375,
+        13.10644817352295,
+        86.62499237060547
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 30,
+        "vertex_indices": [
+          39,
+          17,
+          8
+        ],
+        "vertex_labels": [
+          "FC1",
+          "FCz",
+          "C1"
+        ],
+        "barycentric_coords": [
+          0.0225049945984237,
+          0.3647745686597365,
+          0.6127204367418397
+        ],
+        "distance_to_surface": 2.2225630283355713,
+        "nearest_landmark": {
+          "landmark": "C1",
+          "landmark_index": 8,
+          "offset": [
+            11.735107421875,
+            13.100333213806152,
+            2.4115371704101562
+          ],
+          "distance": 17.75237994290019
+        }
+      }
+    },
+    {
+      "name": "Source_3",
+      "position": [
+        -23.40733528137207,
+        52.395416259765625,
+        71.3704605102539
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 58,
+        "vertex_indices": [
+          45,
+          17,
+          39
+        ],
+        "vertex_labels": [
+          "F1",
+          "FCz",
+          "FC1"
+        ],
+        "barycentric_coords": [
+          0.6312981577290429,
+          0.1375517107593857,
+          0.23115013151157143
+        ],
+        "distance_to_surface": 1.9606541395187378,
+        "nearest_landmark": {
+          "landmark": "F1",
+          "landmark_index": 45,
+          "offset": [
+            1.5841293334960938,
+            -10.250850677490234,
+            7.750568389892578
+          ],
+          "distance": 12.9483867119039
+        }
+      }
+    },
+    {
+      "name": "Source_4",
+      "position": [
+        1.8958652019500732,
+        33.600242614746094,
+        85.1642074584961
+      ],
+      "type": "source",
+      "is_anchor": true,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 59,
+        "vertex_indices": [
+          42,
+          17,
+          48
+        ],
+        "vertex_labels": [
+          "FC2",
+          "FCz",
+          "F2"
+        ],
+        "barycentric_coords": [
+          0.03782444850781503,
+          0.9301656553707878,
+          0.0320098961213972
+        ],
+        "distance_to_surface": 0.6309061050415039,
+        "nearest_landmark": {
+          "landmark": "FCz",
+          "landmark_index": 17,
+          "offset": [
+            2.1469156742095947,
+            1.1615943908691406,
+            -0.44525146484375
+          ],
+          "distance": 2.4812894169441497
+        }
+      }
+    },
+    {
+      "name": "Source_5",
+      "position": [
+        -0.8632824420928955,
+        55.20570373535156,
+        75.3050537109375
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 54,
+        "vertex_indices": [
+          45,
+          16,
+          17
+        ],
+        "vertex_labels": [
+          "F1",
+          "Fz",
+          "FCz"
+        ],
+        "barycentric_coords": [
+          0.020515645510231884,
+          0.7110213862427942,
+          0.2684629682469739
+        ],
+        "distance_to_surface": 0.940830409526825,
+        "nearest_landmark": {
+          "landmark": "Fz",
+          "landmark_index": 16,
+          "offset": [
+            -0.7955548763275146,
+            -7.815513610839844,
+            4.702972412109375
+          ],
+          "distance": 9.156042295189716
+        }
+      }
+    },
+    {
+      "name": "Source_6",
+      "position": [
+        -22.010923385620117,
+        31.876285552978516,
+        81.69184112548828
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 30,
+        "vertex_indices": [
+          39,
+          17,
+          8
+        ],
+        "vertex_labels": [
+          "FC1",
+          "FCz",
+          "C1"
+        ],
+        "barycentric_coords": [
+          0.6539893617100996,
+          0.30867701735214514,
+          0.0373336209377553
+        ],
+        "distance_to_surface": 2.1072423458099365,
+        "nearest_landmark": {
+          "landmark": "FC1",
+          "landmark_index": 39,
+          "offset": [
+            8.720251083374023,
+            -0.7782707214355469,
+            4.996162414550781
+          ],
+          "distance": 10.080184658044152
+        }
+      }
+    },
+    {
+      "name": "Source_7",
+      "position": [
+        -43.498451232910156,
+        27.56698989868164,
+        69.6204605102539
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 28,
+        "vertex_indices": [
+          39,
+          7,
+          40
+        ],
+        "vertex_labels": [
+          "FC1",
+          "C3",
+          "FC3"
+        ],
+        "barycentric_coords": [
+          0.5499162834656492,
+          0.16941187468303298,
+          0.2806718418513178
+        ],
+        "distance_to_surface": 1.5188653469085693,
+        "nearest_landmark": {
+          "landmark": "FC1",
+          "landmark_index": 39,
+          "offset": [
+            -12.767276763916016,
+            -5.087566375732422,
+            -7.075218200683594
+          ],
+          "distance": 15.457858850372425
+        }
+      }
+    },
+    {
+      "name": "Source_8",
+      "position": [
+        -43.071537017822266,
+        7.2740254402160645,
+        77.49142456054688
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 26,
+        "vertex_indices": [
+          39,
+          8,
+          7
+        ],
+        "vertex_labels": [
+          "FC1",
+          "C1",
+          "C3"
+        ],
+        "barycentric_coords": [
+          0.1982493825621191,
+          0.48600311429559173,
+          0.31574750314228917
+        ],
+        "distance_to_surface": 2.1263926029205322,
+        "nearest_landmark": {
+          "landmark": "C1",
+          "landmark_index": 8,
+          "offset": [
+            -9.193424224853516,
+            7.267910957336426,
+            -6.7220306396484375
+          ],
+          "distance": 13.5102655445942
+        }
+      }
+    },
+    {
+      "name": "Source_9",
+      "position": [
+        -41.90155792236328,
+        48.04591751098633,
+        60.3585090637207
+      ],
+      "type": "source",
+      "is_anchor": false,
+      "registration": {
+        "method": "barycentric",
+        "face_index": 124,
+        "vertex_indices": [
+          45,
+          46,
+          40
+        ],
+        "vertex_labels": [
+          "F1",
+          "F3",
+          "FC3"
+        ],
+        "barycentric_coords": [
+          0.45353591309275765,
+          0.04331316282747189,
+          0.5031509240797705
+        ],
+        "distance_to_surface": 1.8837686777114868,
+        "nearest_landmark": {
+          "landmark": "F3",
+          "landmark_index": 46,
+          "offset": [
+            3.101490020751953,
+            -12.894264221191406,
+            13.95266342163086
+          ],
+          "distance": 19.24988607893093
+        }
+      }
+    }
+  ],
+  "connections": [
+    {
+      "optode1": "Detector_7",
+      "optode2": "Source_5",
+      "rest_length": 14.297797101411287,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_4",
+      "optode2": "Detector_5",
+      "rest_length": 24.124861484584542,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_5",
+      "optode2": "Source_9",
+      "rest_length": 44.25835374331173,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_5",
+      "optode2": "Source_8",
+      "rest_length": 16.55987090350708,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_4",
+      "optode2": "Source_6",
+      "rest_length": 16.54814251880026,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_1",
+      "optode2": "Detector_3",
+      "rest_length": 21.841234921895715,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_6",
+      "optode2": "Source_9",
+      "rest_length": 18.120430574248697,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_1",
+      "optode2": "Source_2",
+      "rest_length": 24.101450855855933,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_1",
+      "optode2": "Source_1",
+      "rest_length": 15.456681570282157,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_3",
+      "optode2": "Source_5",
+      "rest_length": 23.056734868672542,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_3",
+      "optode2": "Source_4",
+      "rest_length": 17.971915641238578,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_1",
+      "optode2": "Source_4",
+      "rest_length": 16.294272400588348,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_6",
+      "optode2": "Source_7",
+      "rest_length": 25.0200345062457,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_7",
+      "optode2": "Source_4",
+      "rest_length": 14.655091327342323,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_5",
+      "optode2": "Detector_6",
+      "rest_length": 20.803825474083414,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_4",
+      "optode2": "Source_2",
+      "rest_length": 14.388510417174757,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_5",
+      "optode2": "Source_7",
+      "rest_length": 15.630480301128616,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_4",
+      "optode2": "Source_8",
+      "rest_length": 16.140975342721493,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_1",
+      "optode2": "Detector_8",
+      "rest_length": 18.52013478787233,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_2",
+      "optode2": "Source_6",
+      "rest_length": 19.40773530621606,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_2",
+      "optode2": "Detector_6",
+      "rest_length": 24.68986611918247,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_1",
+      "optode2": "Source_6",
+      "rest_length": 15.416367433410471,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_3",
+      "optode2": "Source_3",
+      "rest_length": 16.686957761262892,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_2",
+      "optode2": "Source_7",
+      "rest_length": 16.319582033952614,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_3",
+      "optode2": "Source_6",
+      "rest_length": 15.67352335695959,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_7",
+      "optode2": "Detector_8",
+      "rest_length": 21.305445566318973,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_4",
+      "optode2": "Source_7",
+      "rest_length": 16.691932232490423,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_6",
+      "optode2": "Source_7",
+      "rest_length": 16.69628652070702,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_1",
+      "optode2": "Source_2",
+      "rest_length": 15.455810293313052,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_3",
+      "optode2": "Source_6",
+      "rest_length": 23.011205840720372,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_2",
+      "optode2": "Source_8",
+      "rest_length": 23.56783106875557,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Source_3",
+      "optode2": "Source_9",
+      "rest_length": 21.959451283824137,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_2",
+      "optode2": "Source_6",
+      "rest_length": 17.720982648069594,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_3",
+      "optode2": "Detector_7",
+      "rest_length": 20.634190265404573,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_3",
+      "optode2": "Source_5",
+      "rest_length": 16.588140541708395,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_2",
+      "optode2": "Source_3",
+      "rest_length": 15.725820831437844,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_2",
+      "optode2": "Source_9",
+      "rest_length": 15.756646222372385,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_8",
+      "optode2": "Source_4",
+      "rest_length": 10.278863345772274,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    },
+    {
+      "optode1": "Detector_8",
+      "optode2": "Source_1",
+      "rest_length": 13.228597485570482,
+      "pull": 0.30000001192092896,
+      "push": 0.30000001192092896,
+      "is_flexible": true
+    }
+  ],
+  "global_settings": {
+    "default_pull": 0.9,
+    "default_push": 0.9
+  }
+}

@@ -48,7 +48,7 @@ import numpy as np
 from scipy.io import savemat
 from scipy.spatial import Delaunay
 
-from _addon_helpers import import_addon, register_addon
+from _addon_helpers import REPO_ROOT, get_view3d_area_and_region, import_addon, register_addon
 
 N_SHELLS = 5
 POINTS_PER_SHELL = 60
@@ -252,3 +252,212 @@ class LightSimulationTest(unittest.TestCase):
             )
         else:
             self.assertEqual(result, {"FINISHED"})
+
+
+# =============================================================================
+# REALISTIC (real Colin27 + real optode probe) LIGHT SENSITIVITY TEST
+# =============================================================================
+#
+# Unlike LightSimulationTest above (a synthetic solid ball with 4 optodes at
+# arbitrary vertex indices - fast and deterministic, but not guaranteed to
+# produce any valid SD pair), this drives the exact real-world scenario:
+#
+#   select_model(ADD_HEADMESH)      -> Colin27 head surface
+#   select_model(ADD_BRAIN1020MESH) -> real 10-10+baseplane landmark set
+#                                       (brain1020_landmarks.jmsh embeds real
+#                                       labels like FCz/C1 that the probe JSON
+#                                       references, so the optode loader's
+#                                       label-based cross-system fallback
+#                                       resolves correctly even though vertex
+#                                       counts don't match exactly)
+#   import_optode_json_blender_goal -> 9 sources / 8 detectors from a real,
+#                                       checked-in probe config
+#   import_layered_mesh             -> real Colin27 5-layer tetrahedral mesh
+#   manual Z-alignment              -> the real head model and the 5-layer
+#                                       mesh don't share an origin convention;
+#                                       this is the same fixed offset needed
+#                                       manually in Blender
+#   run_mmc (gpuid="-1", 1000 photons) -> pmmc's CPU path, which - unlike the
+#                                       mmc_use_gpu=False path
+#                                       LightSimulationTest skips - doesn't
+#                                       need a real OpenCL device
+#   run_redbird                     -> CPU FEM forward solve
+#
+# and checks the results actually look like a real sensitivity map (varying
+# values), not just that each operator returned FINISHED.
+
+COLIN27_HEAD_PATH = os.path.join(REPO_ROOT, "HeadModels", "Colin27_Atlas_scalp.bmsh")
+BRAIN1020_LANDMARK_PATH = os.path.join(REPO_ROOT, "BrainLandmarks", "brain1020_landmarks.jmsh")
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROBE_CONFIG_PATH = os.path.join(TESTS_DIR, "test_probe_config.json")
+COLIN27_5L_MAT_PATH = os.path.join(TESTS_DIR, "colin27Mesh_5layers.mat")
+
+# Empirically-derived alignment: the 5-layer mesh is centered on its own
+# volumetric-node centroid by import_layered_head_model(), which doesn't
+# coincide with the Colin27 head surface's origin. Matches the manual
+# bpy.ops.transform.translate(value=(-0, -0, -31.5246),
+# constraint_axis=(False, False, True)) fix - Z-only, so a direct
+# location.z mutation is exactly equivalent and avoids a context-dependent
+# transform op.
+FIVE_LAYER_Z_ALIGNMENT_OFFSET = -31.5246
+
+EXPECTED_NUM_SOURCES = 9
+EXPECTED_NUM_DETECTORS = 8
+
+
+def _color_attribute_values(obj, name="Sensitivity"):
+    """Return a list of per-loop color tuples for a mesh color attribute, or
+    None if it doesn't exist - version-compat (color_attributes vs the
+    pre-4.0 vertex_colors API), matching the read side of the write logic in
+    lightsim_neurocaptain.visualize_on_cortex / redbird_runner."""
+    mesh = obj.data
+    if bpy.app.version >= (4, 0, 0):
+        attr = mesh.color_attributes.get(name)
+        if attr is None:
+            return None
+        return [tuple(d.color) for d in attr.data]
+    layer = mesh.vertex_colors.get(name)
+    if layer is None:
+        return None
+    return [tuple(d.color) for d in layer.data]
+
+
+class RealisticLightSensitivityTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.addon = import_addon()
+        register_addon(cls.addon)
+        cls.view3d_area, cls.view3d_region = get_view3d_area_and_region()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.addon.unregister()
+
+    def setUp(self):
+        # "Clear scene": this pipeline creates its own headmesh/landmarks/
+        # optodes/layered mesh, distinct from LightSimulationTest's synthetic
+        # sphere fixture - defensively remove any leftovers from a previous
+        # failed run so this test starts from a clean slate regardless of
+        # what ran before it in the shared Blender process.
+        self._remove_scenario_state()
+
+    def tearDown(self):
+        self._remove_scenario_state()
+        self.addon.layered_mesh_manager.LAYERED_MESH.__init__()
+        if "mmc_optical_properties" in bpy.context.scene:
+            del bpy.context.scene["mmc_optical_properties"]
+        settings = bpy.context.scene.neurocaptain_settings
+        settings.mmc_use_gpu = True
+        settings.mmc_gpu_id = "01"
+
+    def _remove_scenario_state(self):
+        object_names = [
+            "headmesh", "headmesh.001", "LandmarkMesh", "importedmodel",
+            "Optode_Connections",
+        ]
+        for name in object_names:
+            obj = bpy.data.objects.get(name)
+            if obj is None:
+                continue
+            mesh = obj.data if obj.type == "MESH" else None
+            bpy.data.objects.remove(obj, do_unlink=True)
+            if mesh is not None and mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+
+        for collection_name in (
+            "Sources", "Detectors", "Anchor Indicators", "FiveLayer_Visualization",
+        ):
+            collection = bpy.data.collections.get(collection_name)
+            if collection is not None:
+                for obj in list(collection.objects):
+                    mesh = obj.data if obj.type == "MESH" else None
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                    if mesh is not None and mesh.users == 0:
+                        bpy.data.meshes.remove(mesh)
+                bpy.data.collections.remove(collection)
+
+        for mat in list(bpy.data.materials):
+            if mat.name.endswith(("_mat", "_Mat", "_Material")) or mat.name in (
+                "HeadSurface_Mat", "Cortex_Mat", "SensMat", "Connection_Material",
+                "Optode_Connection_Stiff",
+            ):
+                bpy.data.materials.remove(mat)
+
+    def test_realistic_pipeline_produces_valid_sensitivity(self):
+        lmm = self.addon.layered_mesh_manager
+        deps = lmm.check_dependencies()
+        self.assertTrue(deps["all_available"], f"missing deps: {deps}")
+        lightsim = self.addon.lightsim_neurocaptain
+        self.assertTrue(lightsim.MMC_AVAILABLE, "pmmc not available")
+        self.assertTrue(lightsim.REDBIRD_AVAILABLE, "redbirdpy not available")
+
+        self.assertIsNotNone(
+            self.view3d_area, "no VIEW_3D area found in factory-startup screen"
+        )
+
+        with bpy.context.temp_override(area=self.view3d_area, region=self.view3d_region):
+            result = bpy.ops.braincapgen.select_model(
+                action="ADD_HEADMESH",
+                filepath=COLIN27_HEAD_PATH,
+                files=[{"name": os.path.basename(COLIN27_HEAD_PATH)}],
+            )
+        self.assertEqual(result, {"FINISHED"})
+        self.assertIsNotNone(bpy.data.objects.get("headmesh"))
+
+        result = bpy.ops.braincapgen.select_model(
+            action="ADD_BRAIN1020MESH",
+            filepath=BRAIN1020_LANDMARK_PATH,
+            files=[{"name": os.path.basename(BRAIN1020_LANDMARK_PATH)}],
+        )
+        self.assertEqual(result, {"FINISHED"})
+        self.assertIsNotNone(bpy.data.objects.get("LandmarkMesh"))
+
+        # Fewer cloth-sim frames than the default (100) to keep this fast in
+        # CI - the bake still converges, it's just a shorter relaxation.
+        result = bpy.ops.neurocaptain.import_optode_json_blender_goal(
+            filepath=PROBE_CONFIG_PATH, simulation_frames=20,
+        )
+        self.assertEqual(result, {"FINISHED"})
+        sources = bpy.data.collections.get("Sources")
+        detectors = bpy.data.collections.get("Detectors")
+        self.assertIsNotNone(sources)
+        self.assertIsNotNone(detectors)
+        self.assertEqual(len(sources.objects), EXPECTED_NUM_SOURCES)
+        self.assertEqual(len(detectors.objects), EXPECTED_NUM_DETECTORS)
+
+        result = bpy.ops.neurocaptain.import_layered_mesh(filepath=COLIN27_5L_MAT_PATH)
+        self.assertEqual(result, {"FINISHED"})
+        self.assertTrue(lmm.is_mesh_loaded())
+        head_surface = bpy.data.objects.get("Head_Surface_5L")
+        cortex = bpy.data.objects.get("Brain_Cortex_5L")
+        self.assertIsNotNone(head_surface)
+        self.assertIsNotNone(cortex)
+        self.assertGreater(len(head_surface.data.polygons), 0)
+        self.assertGreater(len(cortex.data.polygons), 0)
+
+        # Align the imported 5-layer mesh with the Colin27 head surface.
+        head_surface.location.z += FIVE_LAYER_Z_ALIGNMENT_OFFSET
+        cortex.location.z += FIVE_LAYER_Z_ALIGNMENT_OFFSET
+
+        settings = bpy.context.scene.neurocaptain_settings
+        settings.mmc_use_gpu = True
+        settings.mmc_gpu_id = "-1"  # pmmc's CPU path - no OpenCL device needed
+        settings.mmc_nphoton = 1000
+
+        result = bpy.ops.neurocaptain.run_mmc()
+        self.assertEqual(result, {"FINISHED"})
+        mmc_colors = _color_attribute_values(cortex, "Sensitivity")
+        self.assertIsNotNone(mmc_colors, "run_mmc did not paint a Sensitivity map on the cortex")
+        self.assertGreater(
+            len({round(c[0], 3) for c in mmc_colors}), 1,
+            "MMC sensitivity map is uniform (no real variation) - looks like a degenerate result",
+        )
+
+        result = bpy.ops.neurocaptain.run_redbird()
+        self.assertEqual(result, {"FINISHED"})
+        redbird_colors = _color_attribute_values(cortex, "Sensitivity")
+        self.assertIsNotNone(redbird_colors, "run_redbird did not paint a Sensitivity map on the cortex")
+        self.assertGreater(
+            len({round(c[0], 3) for c in redbird_colors}), 1,
+            "Redbird sensitivity map is uniform (no real variation) - looks like a degenerate result",
+        )

@@ -18,9 +18,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        # 3.6 and 4.2 are the current Blender LTS releases; 5.0 is latest stable.
+        # 3.6 and 4.2 are the current Blender LTS releases; 5.2 is latest stable
+        # (5.0 kept too - a real regression was found on 5.2 that 5.0 didn't
+        # catch: boolean_cut()'s modifier_apply() calls silently failed on
+        # 5.2 specifically, with wireframe/remesh then running on the
+        # uncut full head instead of erroring - this matrix missing the
+        # actual latest release is exactly how that went unnoticed).
         # dual_mesh_NC hard-requires Blender >= 3.4.0, so nothing older belongs here.
-        blender-version: ["3.6", "4.2", "5.0"]
+        blender-version: ["3.6", "4.2", "5.0", "5.2"]
     runs-on: ${{ matrix.os }}
     defaults:
       run:

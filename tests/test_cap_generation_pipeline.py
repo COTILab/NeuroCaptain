@@ -302,6 +302,7 @@ class CapGenerationPipelineTest(unittest.TestCase):
                 f"scale={tuple(round(c, 2) for c in cutout_obj.scale)}"
             )
 
+        pre_boolean_z_dimension = head.dimensions[2]
         result = bpy.ops.braincapgen.cap_generation(action="BOOLEAN_CUT", thick=2, voxel=0.5)
         self.assertEqual(result, {"FINISHED"})
         head = bpy.data.objects["headmesh"]
@@ -312,6 +313,19 @@ class CapGenerationPipelineTest(unittest.TestCase):
             max(head.dimensions), MIN_PLAUSIBLE_STAGE_DIMENSION_MM,
             f"cap mesh collapsed to an implausibly small size after BOOLEAN_CUT: "
             f"dimensions={tuple(head.dimensions)}",
+        )
+        # bottom_cutout is specifically designed to remove the lower
+        # portion of the head, so a real cut should meaningfully shrink the
+        # Z dimension - this catches a "boolean cuts silently no-opped"
+        # regression (observed on Blender 5.2: modifier_apply() failed
+        # silently on all three cuts, so wireframe+remesh ran on the
+        # untouched full head) that the size-floor check above wouldn't:
+        # an un-cut full head isn't "implausibly small", it's just wrong.
+        self.assertLess(
+            head.dimensions[2], pre_boolean_z_dimension * 0.9,
+            f"cap mesh height ({head.dimensions[2]:.1f}mm) isn't meaningfully "
+            f"smaller than before BOOLEAN_CUT ({pre_boolean_z_dimension:.1f}mm) - "
+            f"the boolean cuts may have silently no-opped",
         )
 
         non_manifold_ratio = _non_manifold_edge_ratio(head)

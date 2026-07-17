@@ -79,18 +79,31 @@ class cap_generation(Operator):
             self.report({"ERROR"}, "headmesh not found!")
             return {"CANCELLED"}
 
+        result = {"FINISHED"}
+
         if self.action == "REFERENCE_POINT":
-            self.reference_point(context)
+            result = self.reference_point(context)
 
         elif self.action == "PLACE_CUTOUTS":
-            self.place_cutouts(context)
+            result = self.place_cutouts(context)
 
         elif self.action == "BOOLEAN_CUT":
             global thickness
             global voxelsize
             thickness = self.thick
             voxelsize = self.voxel
-            self.boolean_cut(context)
+            result = self.boolean_cut(context)
+
+        # reference_point()'s success path returns a plain vselect list
+        # (not an operator-result dict) and place_cutouts()/boolean_cut()
+        # return nothing on their success path (falling through to None) -
+        # only their explicit {"CANCELLED"} error path matters here. This
+        # used to be ignored entirely (execute() always returned FINISHED
+        # regardless), which let real failures - e.g. a boolean modifier
+        # silently failing to apply - pass through unreported while later
+        # steps (wireframe/remesh) ran on the wrong, uncut mesh anyway.
+        if result == {"CANCELLED"}:
+            return {"CANCELLED"}
 
         return {"FINISHED"}
 
@@ -234,8 +247,26 @@ class cap_generation(Operator):
 
         return {"FINISHED"}
 
-    @staticmethod
-    def boolean_cut(context):
+    def _apply_modifier(self, obj, modifier_name):
+        """bpy.ops.object.modifier_apply()'s return value was never checked
+        anywhere in boolean_cut() - if a modifier silently fails to apply
+        (observed on Blender 5.2: the three boolean cuts didn't happen at
+        all, yet wireframe/remesh still ran on the untouched full head,
+        producing a wireframed/remeshed head instead of a cut-down cap),
+        execution just continued past it as if nothing were wrong. Cancel
+        loudly instead."""
+        result = bpy.ops.object.modifier_apply(modifier=modifier_name)
+        if result != {"FINISHED"}:
+            self.report(
+                {"ERROR"},
+                f"Failed to apply '{modifier_name}' modifier on {obj.name} "
+                f"(result={result}) - cap generation aborted before "
+                f"wireframe/remesh would have run on the wrong mesh",
+            )
+            return False
+        return True
+
+    def boolean_cut(self, context):
         head = bpy.data.objects["headmesh"]
         face = bpy.data.objects["face_cutout"]
         bottom = bpy.data.objects["bottom_cutout"]
@@ -248,7 +279,8 @@ class cap_generation(Operator):
         bool_three.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
         ear.hide_set(True)
         bpy.context.view_layer.objects.active = head
-        bpy.ops.object.modifier_apply(modifier="bool 3")
+        if not self._apply_modifier(head, "bool 3"):
+            return {"CANCELLED"}
 
         try:
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -266,7 +298,8 @@ class cap_generation(Operator):
         bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
         bottom.hide_set(True)
         bpy.context.view_layer.objects.active = head
-        bpy.ops.object.modifier_apply(modifier="bool 2")
+        if not self._apply_modifier(head, "bool 2"):
+            return {"CANCELLED"}
 
         # This used to toggle into edit mode and delete whatever faces were
         # already selected, with nothing explicitly selecting any faces
@@ -294,7 +327,8 @@ class cap_generation(Operator):
         bool_one.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
         face.hide_set(True)
         bpy.context.view_layer.objects.active = head
-        bpy.ops.object.modifier_apply(modifier="bool 1")
+        if not self._apply_modifier(head, "bool 1"):
+            return {"CANCELLED"}
 
         try:
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -311,11 +345,13 @@ class cap_generation(Operator):
         wire.use_even_offset = False
         wire.use_boundary = True
         wire.use_crease = False
-        bpy.ops.object.modifier_apply(modifier="wireframe")
+        if not self._apply_modifier(head, "wireframe"):
+            return {"CANCELLED"}
 
         remesh = head.modifiers.new(type="REMESH", name="remesh")
         remesh.voxel_size = voxelsize
-        bpy.ops.object.modifier_apply(modifier="remesh")
+        if not self._apply_modifier(head, "remesh"):
+            return {"CANCELLED"}
         bpy.context.view_layer.objects.active = head
 
         return {"FINISHED"}

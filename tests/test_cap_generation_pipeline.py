@@ -224,10 +224,36 @@ class CapGenerationPipelineTest(unittest.TestCase):
         nz_world = self._landmark_world_position(landmark_obj, "Nz")
         print(f"[cap-gen diagnostic] Nz landmark world position: {tuple(round(c, 2) for c in nz_world)}")
 
-        # --- circle cutout + project onto the head surface -----------------
+        # --- head density (matches the real workflow: density is set
+        # BEFORE the landmark holes are carved in, not after - decimating a
+        # mesh that's already been perforated with ~80 small holes at an
+        # aggressive 0.05 ratio is a much riskier operation than decimating
+        # a clean mesh and then carving holes into the resulting coarser
+        # topology) --------------------------------------------------------
+        pre_decimate_face_count = len(head.data.polygons)
+        _log_head_dimensions(head, "before decimate_mesh(0.05)")
+        result = bpy.ops.braincapgen.decimate_mesh(number=DECIMATE_RATIO)
+        self.assertEqual(result, {"FINISHED"})
+        head = bpy.data.objects["headmesh"]
+        post_decimate_face_count = len(head.data.polygons)
+        self.assertGreater(
+            post_decimate_face_count, 50,
+            "decimate_mesh(0.05) should not collapse the head to near-nothing",
+        )
+        self.assertLess(
+            post_decimate_face_count, pre_decimate_face_count,
+            "decimate_mesh(0.05) should actually reduce the face count",
+        )
+        _log_head_dimensions(head, "after decimate_mesh(0.05)")
+        self.assertGreater(
+            max(head.dimensions), MIN_PLAUSIBLE_STAGE_DIMENSION_MM,
+            f"headmesh collapsed to an implausibly small size after decimate_mesh(): "
+            f"dimensions={tuple(head.dimensions)}",
+        )
+
+        # --- circle cutout + project onto the (now-decimated) head surface -
         pre_cutout_vert_count = len(head.data.vertices)
         pre_cutout_face_count = len(head.data.polygons)
-        _log_head_dimensions(head, "before insert_shape/geo_nodes")
 
         result = bpy.ops.braincapgen.insert_shape(action="ADD_CYLINDER")
         self.assertEqual(result, {"FINISHED"})
@@ -249,32 +275,10 @@ class CapGenerationPipelineTest(unittest.TestCase):
             f"dimensions={tuple(head.dimensions)}",
         )
 
-        # --- head density -----------------------------------------------
-        pre_decimate_face_count = len(head.data.polygons)
-        result = bpy.ops.braincapgen.decimate_mesh(number=DECIMATE_RATIO)
-        self.assertEqual(result, {"FINISHED"})
-        head = bpy.data.objects["headmesh"]
-        post_decimate_face_count = len(head.data.polygons)
-        self.assertGreater(
-            post_decimate_face_count, 50,
-            "decimate_mesh(0.05) should not collapse the head to near-nothing",
-        )
-        self.assertLess(
-            post_decimate_face_count, pre_decimate_face_count,
-            "decimate_mesh(0.05) should actually reduce the face count",
-        )
-        _log_head_dimensions(head, "after decimate_mesh(0.05)")
-        self.assertGreater(
-            max(head.dimensions), MIN_PLAUSIBLE_STAGE_DIMENSION_MM,
-            f"headmesh collapsed to an implausibly small size after decimate_mesh(): "
-            f"dimensions={tuple(head.dimensions)}",
-        )
-
         # --- choose the reference vertex closest to Nz --------------------
         # Scriptable equivalent of manually clicking the vertex nearest the
-        # Nz landmark in the viewport, done on the now-decimated headmesh
-        # (matches the real workflow: density is set before the reference
-        # point is picked).
+        # Nz landmark in the viewport, done on the now-decimated,
+        # now-perforated headmesh.
         nearest_index = select_nearest_vertex(head, nz_world)
         nearest_world = head.matrix_world @ head.data.vertices[nearest_index].co
         nz_pick_distance = (nearest_world - nz_world).length

@@ -94,6 +94,23 @@ MAX_PLAUSIBLE_HEAD_BBOX_DIAGONAL_MM = 350.0
 # normally hand back an (almost) fully closed/manifold shell.
 MAX_NON_MANIFOLD_EDGE_RATIO = 0.05
 
+# Catches "the wrong object ended up as the cap" bugs that a plain size-floor
+# check can't (observed manually on Blender 5.2: a boolean-apply failure left
+# the ear_cutout cylinder itself as headmesh's final shape, and it still
+# passed every existing numeric check - non-degenerate size, real vertices,
+# even a Z-dimension smaller than before BOOLEAN_CUT). ear_cutout's own
+# bounding box, worked out from its actual scale/rotation in place_cutouts()
+# (scale=(dim0/9, dim1/7, dim2*1.2), rotated 90deg around Y), comes out to
+# roughly a 13:1 aspect ratio - a real skull-cap shape (wide/deep, shortened
+# by the bottom cut) is nowhere near that elongated, even accounting for a
+# fairly short cap. 8x leaves comfortable margin on both sides.
+MAX_PLAUSIBLE_CAP_ASPECT_RATIO = 8.0
+
+# A real head-sized cap surface remeshed at 0.5mm voxels should produce
+# thousands of faces; this is a generous floor just to catch a genuinely
+# degenerate/near-empty result, not a tight bound.
+MIN_PLAUSIBLE_CAP_FACE_COUNT = 500
+
 CREATED_OBJECT_NAMES = [
     "headmesh",
     "headmesh.001",
@@ -333,6 +350,30 @@ class CapGenerationPipelineTest(unittest.TestCase):
             non_manifold_ratio, MAX_NON_MANIFOLD_EDGE_RATIO,
             f"cap mesh has {non_manifold_ratio:.1%} non-manifold edges after "
             f"boolean cut + wireframe + remesh - likely broken topology",
+        )
+
+        # Shape-sanity checks: catch "the wrong object ended up as the cap"
+        # regardless of the numeric size/dimension checks above (a bare
+        # cutout primitive can still pass those by coincidence).
+        for name in ("face_cutout", "bottom_cutout", "ear_cutout"):
+            self.assertIsNone(
+                bpy.data.objects.get(name),
+                f"{name} should have been deleted once consumed by its "
+                f"boolean modifier, not left lingering in the scene",
+            )
+
+        cap_dimensions = tuple(head.dimensions)
+        aspect_ratio = max(cap_dimensions) / max(min(cap_dimensions), 1e-6)
+        self.assertLess(
+            aspect_ratio, MAX_PLAUSIBLE_CAP_ASPECT_RATIO,
+            f"cap mesh bounding box {cap_dimensions} has an aspect ratio of "
+            f"{aspect_ratio:.1f}x - too elongated to be a real cap shape "
+            f"(looks like a leftover cutout primitive, not headmesh itself)",
+        )
+        self.assertGreater(
+            len(head.data.polygons), MIN_PLAUSIBLE_CAP_FACE_COUNT,
+            f"cap mesh only has {len(head.data.polygons)} faces after "
+            f"wireframe+remesh - too few to be a real head-sized cap surface",
         )
 
         result = bpy.ops.object.dual_mesh()

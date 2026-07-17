@@ -247,6 +247,19 @@ class cap_generation(Operator):
 
         return {"FINISHED"}
 
+    @staticmethod
+    def _remove_cutout_object(obj):
+        """Delete a cutout object (ear/bottom/face) once it's been baked
+        into a boolean modifier. Previously these were only hidden
+        (hide_set(True)), never actually removed, so they lingered in the
+        scene indefinitely after cap generation - orphaned objects that
+        served no further purpose and were an unnecessary source of
+        confusion about which object is actually the generated cap."""
+        mesh = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
     def _apply_modifier(self, obj, modifier_name):
         """bpy.ops.object.modifier_apply()'s return value was never checked
         anywhere in boolean_cut() - if a modifier silently fails to apply
@@ -277,10 +290,10 @@ class cap_generation(Operator):
         bool_three.object = ear
         bool_three.operation = "DIFFERENCE"
         bool_three.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
-        ear.hide_set(True)
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 3"):
             return {"CANCELLED"}
+        self._remove_cutout_object(ear)
 
         try:
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -296,10 +309,10 @@ class cap_generation(Operator):
         bool_two.object = bottom
         bool_two.operation = "DIFFERENCE"
         bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
-        bottom.hide_set(True)
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 2"):
             return {"CANCELLED"}
+        self._remove_cutout_object(bottom)
 
         # This used to toggle into edit mode and delete whatever faces were
         # already selected, with nothing explicitly selecting any faces
@@ -325,10 +338,10 @@ class cap_generation(Operator):
         bool_one.object = face
         bool_one.operation = "DIFFERENCE"
         bool_one.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
-        face.hide_set(True)
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 1"):
             return {"CANCELLED"}
+        self._remove_cutout_object(face)
 
         try:
             bpy.ops.object.mode_set(mode="OBJECT")

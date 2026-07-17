@@ -8,27 +8,35 @@ smoke test would use:
 
     select_model(ADD_HEADMESH)      -> headmesh, headmesh.001
     select_model(ADD_BRAIN1020MESH) -> LandmarkMesh (precomputed landmarks)
+    decimate_mesh(0.05)             -> "head density 0.05"
+    dual_mesh()                     -> "set dual mesh": polygonal dual,
+                                        done BEFORE the cutouts/boolean
+                                        cut, matching the real workflow
     insert_shape(ADD_CYLINDER)      -> circular cutout
     geo_nodes()                     -> "project cutouts": cuts landmark
-                                        holes into headmesh
-    decimate_mesh(0.05)             -> "head density 0.05"
+                                        holes into the now-dual-meshed
+                                        headmesh
     select nearest headmesh vertex to Nz  -> scriptable equivalent of
                                         manually clicking the reference
                                         vertex in the viewport
     cap_generation(PLACE_CUTOUTS, BOOLEAN_CUT) -> wireframe cap shape
-    dual_mesh()                     -> polygonal dual mesh
     export_mesh()                   -> writes a .jmsh file
     circumference()                 -> estimate cap circumference
 
-This intentionally keeps the *order* proven to work by earlier iterations of
-this test (geo_nodes/decimate before the boolean cut, dual_mesh last) since
-that's what each operator's real object/state dependencies require, while
-using the realistic decimate ratio and head model that exposed the cap-gen
-regression this test suite failed to catch. It also checks more than "the
-operator returned FINISHED" at each stage: face/vertex counts must actually
-change where a step is supposed to change them, the final mesh must not be
-riddled with non-manifold edges, and the exported mesh's physical size and
-measured circumference must be plausible for a human head.
+This order matters and was previously wrong: an earlier revision ran
+dual_mesh() last (after BOOLEAN_CUT), matching what an older, more lenient
+(0.5 decimate ratio) version of this test happened to use - but the real
+workflow converts to a dual mesh right after decimating, BEFORE the cutouts
+and boolean cut ever run. Running geo_nodes()'s landmark-hole carving and
+capgen.py's three boolean subtractions against an n-gon-heavy dual mesh,
+instead of the original triangulated surface, is a materially different
+(and apparently much more Blender-version-sensitive) input to those
+booleans - this reordering is what actually let the Blender 5.2 regression
+reproduce here. It also checks more than "the operator returned FINISHED"
+at each stage: face/vertex counts must actually change where a step is
+supposed to change them, the final mesh must not be riddled with
+non-manifold edges, and the exported mesh's physical size and measured
+circumference must be plausible for a human head.
 
 brain1020mesh.py's interactive 5-point (Nz/Iz/Lpa/Rpa/Cz) picking has no
 scriptable equivalent and needs iso2mesh, so it's deliberately skipped by
@@ -278,7 +286,26 @@ class CapGenerationPipelineTest(unittest.TestCase):
             f"dimensions={tuple(head.dimensions)}",
         )
 
-        # --- circle cutout + project onto the (now-decimated) head surface -
+        # --- set dual mesh (matches the real workflow: this runs right
+        # after density is set, BEFORE the cutouts/boolean cut - not after
+        # BOOLEAN_CUT like an earlier revision of this test had it) --------
+        result = bpy.ops.object.dual_mesh()
+        self.assertEqual(result, {"FINISHED"})
+        head = bpy.data.objects["headmesh"]
+        self.assertGreater(len(head.data.vertices), 0)
+        self.assertGreater(
+            len(head.data.polygons), 20,
+            "dual mesh conversion produced an implausibly low polygon count",
+        )
+        _log_head_dimensions(head, "after dual_mesh()")
+        self.assertGreater(
+            max(head.dimensions), MIN_PLAUSIBLE_STAGE_DIMENSION_MM,
+            f"headmesh collapsed to an implausibly small size after dual_mesh(): "
+            f"dimensions={tuple(head.dimensions)}",
+        )
+
+        # --- circle cutout + project onto the (now-decimated, now-dual)
+        # head surface -------------------------------------------------------
         pre_cutout_vert_count = len(head.data.vertices)
         pre_cutout_face_count = len(head.data.polygons)
 
@@ -393,16 +420,6 @@ class CapGenerationPipelineTest(unittest.TestCase):
             f"actually remove the intended material (modifier_apply() can "
             f"report success while doing nothing geometrically effective).",
         )
-
-        result = bpy.ops.object.dual_mesh()
-        self.assertEqual(result, {"FINISHED"})
-        head = bpy.data.objects["headmesh"]
-        self.assertGreater(len(head.data.vertices), 0)
-        self.assertGreater(
-            len(head.data.polygons), 20,
-            "dual mesh conversion produced an implausibly low polygon count",
-        )
-        _log_head_dimensions(head, "after dual_mesh()")
 
         bpy.context.view_layer.objects.active = head
         result = bpy.ops.braincapgen.export_mesh(filename=self.export_filename)

@@ -258,26 +258,6 @@ class geo_nodes(Operator):
             pass
         bpy.ops.object.mode_set(mode="OBJECT")
 
-        # The Geometry Nodes Mesh Boolean (DIFFERENCE) node carves dozens of
-        # small, closely-spaced landmark holes into headmesh in a single
-        # pass - overlapping/adjacent hole intersections are a well-known
-        # source of degenerate (zero-area) faces and inconsistent face
-        # winding coming out of a boolean op. Nothing downstream (decimate,
-        # then three more modifier-based boolean cuts, then wireframe +
-        # voxel remesh) repairs that, so a defect introduced here can
-        # silently destabilize the whole rest of the cap-generation pipeline
-        # (observed: boolean_cut() in capgen.py either crashes on Blender's
-        # pre-4.0 FAST solver, or the EXACT solver produces a near-empty
-        # sliver mesh instead of a real cap). Clean it up immediately.
-        head = bpy.data.objects["headmesh"]
-        bm = bmesh.new()
-        bm.from_mesh(head.data)
-        bmesh.ops.dissolve_degenerate(bm, dist=0.0001, edges=bm.edges)
-        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-        bm.to_mesh(head.data)
-        bm.free()
-        head.data.update()
-
         return {"FINISHED"}
 
     def invoke(self, context, event):

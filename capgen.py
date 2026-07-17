@@ -227,8 +227,24 @@ class cap_generation(Operator):
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.modifier_apply(modifier="bool 2")
 
+        # This used to toggle into edit mode and delete whatever faces were
+        # already selected, with nothing explicitly selecting any faces
+        # beforehand - it depended entirely on incidental left-over
+        # selection state from earlier in the pipeline. That's exactly the
+        # kind of behavior Blender 4.0's boolean-modifier rewrite (BMesh ->
+        # Exact/Carve solver) can silently change: whatever geometry a
+        # modifier_apply() leaves selected is an internal implementation
+        # detail, not a documented contract. On 3.4 nothing ends up
+        # selected here (effectively a no-op); on 4.2/5.0 the new solver
+        # apparently leaves the newly-merged geometry selected, so this
+        # deleted almost the entire head, leaving only a tiny disconnected
+        # fragment (confirmed: reproduced manually on 5.0, not on 3.4).
+        # Force it to the guaranteed no-op that already matched the
+        # working 3.4 behavior, instead of relying on undefined state.
         bpy.ops.object.editmode_toggle()
+        bpy.ops.mesh.select_all(action="DESELECT")
         bpy.ops.mesh.delete(type="FACE")
+        bpy.ops.object.editmode_toggle()
 
         bpy.ops.object.mode_set(mode="OBJECT")
         bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")

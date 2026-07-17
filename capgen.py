@@ -2,6 +2,33 @@ import bpy
 from bpy.types import Operator
 from bpy.props import EnumProperty, FloatProperty, BoolProperty
 from .utils import *
+from .landmark_labels import get_landmark_labels
+
+
+def _find_landmark_nz(context):
+    """Look for an Nz landmark already present in the scene - from a
+    previous manual define-Nz step (brain1020mesh.py's interactive
+    picking), or from generating/importing 10-20 (or 10-10/10-5) landmarks
+    via select_model(ADD_BRAIN1020MESH) - so the user doesn't have to
+    manually re-pick a headmesh vertex every time a LandmarkMesh with a
+    real Nz label is already in the scene.
+
+    Returns an [x, y, z] world-space position, or None if no usable
+    LandmarkMesh/Nz label is found.
+    """
+    landmark_obj = bpy.data.objects.get("LandmarkMesh")
+    if landmark_obj is None or not landmark_obj.data.vertices:
+        return None
+
+    labels = get_landmark_labels(landmark_obj)
+    if "Nz" not in labels:
+        return None
+
+    index = labels.index("Nz")
+    local = landmark_obj.data.vertices[index].co
+    world = landmark_obj.matrix_world @ local
+    return list(world)
+
 
 enum_action = [
     ("REFERENCE_POINT", "reference_point", "select Nz vertice, then press okay"),
@@ -107,6 +134,13 @@ class cap_generation(Operator):
             vselect = saved_nz
             print("Reference Nz (saved):", vselect)
 
+        elif (landmark_nz := _find_landmark_nz(context)) is not None:
+            vselect = landmark_nz
+            context.scene["vselect"] = vselect
+            context.scene["nz_assigned"] = True
+            context.scene["saved_nz"] = vselect
+            print("Reference Nz (found on LandmarkMesh in scene):", vselect)
+
         else:
             ShowMessageBox(
                 "Select the vertex that corresponds to Nz and select OK", "Error", "ERROR"
@@ -140,6 +174,13 @@ class cap_generation(Operator):
         elif saved_nz is not None:
             vselect = saved_nz
             print("Reference Nz (saved in cutouts):", vselect)
+
+        elif (landmark_nz := _find_landmark_nz(context)) is not None:
+            vselect = landmark_nz
+            context.scene["vselect"] = vselect
+            context.scene["nz_assigned"] = True
+            context.scene["saved_nz"] = vselect
+            print("Reference Nz (found on LandmarkMesh in scene, in cutouts):", vselect)
 
         else:
             ShowMessageBox(

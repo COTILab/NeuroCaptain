@@ -236,7 +236,17 @@ def run_redbird_simulation():
             'success': False,
             'message': 'No head surface found'
         }
-    
+
+    # run_redbird_simulation()/visualize_on_cortex() hide this object
+    # (hide_viewport=True) at the end of a previous successful run, purely
+    # so the cortex heatmap displays cleanly - but a hidden object has no
+    # evaluated depsgraph data, which get_inward_normal_at_point()'s
+    # closest_point_on_mesh() call below needs. Without this, a second run
+    # fails with "RuntimeError: Object '...' has no evaluated mesh data"
+    # instead of actually running.
+    if headmesh.hide_viewport:
+        headmesh.hide_viewport = False
+
     bl_verts = get_blender_vertices(headmesh)
 
     # Head_Surface_5L is created with ALL volumetric nodes as vertices,

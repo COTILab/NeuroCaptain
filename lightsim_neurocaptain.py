@@ -836,6 +836,15 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
 
     # Use ref object for surface projection
     headmesh = ref_obj
+    # visualize_on_cortex() hides this object (hide_viewport=True) at the end
+    # of a previous successful run, purely so the cortex heatmap displays
+    # cleanly - but a hidden object has no evaluated depsgraph data, which
+    # get_surface_normal_inward()'s BVHTree.FromObject() call below needs.
+    # Without this, a second run (or Redbird after MMC) fails with
+    # "SystemError: ... FromObject ... returned NULL without setting an
+    # exception" instead of a normal, catchable error.
+    if headmesh.hide_viewport:
+        headmesh.hide_viewport = False
     mesh_center = nodes.mean(axis=0)   # interior reference for normal direction checks
     
     # Precompute search structures

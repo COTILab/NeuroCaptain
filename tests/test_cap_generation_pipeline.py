@@ -106,10 +106,20 @@ MAX_NON_MANIFOLD_EDGE_RATIO = 0.05
 # fairly short cap. 8x leaves comfortable margin on both sides.
 MAX_PLAUSIBLE_CAP_ASPECT_RATIO = 8.0
 
-# A real head-sized cap surface remeshed at 0.5mm voxels should produce
-# thousands of faces; this is a generous floor just to catch a genuinely
-# degenerate/near-empty result, not a tight bound.
-MIN_PLAUSIBLE_CAP_FACE_COUNT = 500
+# Ground truth captured directly from CI: a known-working run (Blender 3.6)
+# produced exactly 246,636 faces after BOOLEAN_CUT for this exact head
+# model/decimate ratio/thickness/voxel-size combination. Blender 5.2 was
+# independently confirmed broken by manual inspection (the cap doesn't
+# look right) and produced 590,356 faces in the same CI run - ~2.4x more
+# surface area, consistent with the boolean cuts not actually removing
+# material even though modifier_apply() reports {'FINISHED'} (a "succeeded
+# but geometrically ineffective" boolean, not a hard failure the
+# _apply_modifier() check in capgen.py would catch). A tight +/-10% band
+# around the known-good count catches this cleanly without needing to
+# model the exact geometric mechanism - it's nowhere near wide enough to
+# let 590,356 through.
+EXPECTED_BOOLEAN_CUT_FACE_COUNT = 246636
+BOOLEAN_CUT_FACE_COUNT_TOLERANCE = 0.10  # +/- 10%
 
 CREATED_OBJECT_NAMES = [
     "headmesh",
@@ -370,10 +380,18 @@ class CapGenerationPipelineTest(unittest.TestCase):
             f"{aspect_ratio:.1f}x - too elongated to be a real cap shape "
             f"(looks like a leftover cutout primitive, not headmesh itself)",
         )
-        self.assertGreater(
-            len(head.data.polygons), MIN_PLAUSIBLE_CAP_FACE_COUNT,
-            f"cap mesh only has {len(head.data.polygons)} faces after "
-            f"wireframe+remesh - too few to be a real head-sized cap surface",
+        boolean_cut_face_count = len(head.data.polygons)
+        face_count_lower_bound = EXPECTED_BOOLEAN_CUT_FACE_COUNT * (1 - BOOLEAN_CUT_FACE_COUNT_TOLERANCE)
+        face_count_upper_bound = EXPECTED_BOOLEAN_CUT_FACE_COUNT * (1 + BOOLEAN_CUT_FACE_COUNT_TOLERANCE)
+        self.assertTrue(
+            face_count_lower_bound <= boolean_cut_face_count <= face_count_upper_bound,
+            f"cap mesh face count ({boolean_cut_face_count}) is outside "
+            f"+/-{BOOLEAN_CUT_FACE_COUNT_TOLERANCE:.0%} of the known-good "
+            f"reference ({EXPECTED_BOOLEAN_CUT_FACE_COUNT}) - bounds: "
+            f"[{face_count_lower_bound:.0f}, {face_count_upper_bound:.0f}]. "
+            f"A count this far off usually means the boolean cuts didn't "
+            f"actually remove the intended material (modifier_apply() can "
+            f"report success while doing nothing geometrically effective).",
         )
 
         result = bpy.ops.object.dual_mesh()

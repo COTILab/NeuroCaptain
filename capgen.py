@@ -289,7 +289,18 @@ class cap_generation(Operator):
         bool_three = head.modifiers.new(type="BOOLEAN", name="bool 3")
         bool_three.object = ear
         bool_three.operation = "DIFFERENCE"
-        bool_three.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
+        # 'EXACT' was silently failing to actually remove material on
+        # Blender 4.2/5.0/5.2 once the boolean cuts run against the
+        # n-gon-heavy dual mesh (dual_mesh() now runs before these cuts,
+        # matching the real workflow - see test_cap_generation_pipeline.py)
+        # - modifier_apply() reported {'FINISHED'} the whole time, but the
+        # cap's height barely shrank (or even grew past the original head
+        # height once wireframe/remesh ran on the effectively-uncut mesh).
+        # Confirmed by manual testing on 5.2: BooleanModifier's third
+        # solver option, 'FLOAT', produces a correct cut where 'EXACT'
+        # doesn't. 'FAST' remains correct for pre-4.0 (3.6), where it
+        # already works.
+        bool_three.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 3"):
             return {"CANCELLED"}
@@ -308,7 +319,7 @@ class cap_generation(Operator):
         bool_two = head.modifiers.new(type="BOOLEAN", name="bool 2")
         bool_two.object = bottom
         bool_two.operation = "DIFFERENCE"
-        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
+        bool_two.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 2"):
             return {"CANCELLED"}
@@ -337,7 +348,7 @@ class cap_generation(Operator):
         bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")
         bool_one.object = face
         bool_one.operation = "DIFFERENCE"
-        bool_one.solver = "FAST" if bpy.app.version < (4, 0, 0) else "EXACT"
+        bool_one.solver = "FAST" if bpy.app.version < (4, 0, 0) else "FLOAT"
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 1"):
             return {"CANCELLED"}

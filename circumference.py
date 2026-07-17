@@ -120,8 +120,14 @@ class circumference_calc(Operator):
             "orient_type": "GLOBAL",
             "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
         }
-        if bpy.app.version < (4, 0, 0):
-            translate_args["orient_axis_ortho"] = "X"
+        # This used to add orient_axis_ortho="X" for bpy.app.version < (4,0,0),
+        # on the assumption TRANSFORM_OT_translate needed it pre-4.0. Confirmed
+        # via CI on Blender 3.6 that's wrong: TRANSFORM_OT_translate doesn't
+        # recognize that keyword at all, on any currently-supported version
+        # (3.6/4.2/5.0) - it raised "TypeError: ... keyword
+        # 'orient_axis_ortho' unrecognized". 4.2/5.0 never hit this (the
+        # version gate already skipped adding it there); dropping it
+        # entirely fixes 3.6 without changing 4.2/5.0 behavior at all.
         bpy.ops.mesh.duplicate_move(
             MESH_OT_duplicate={"mode": 1},
             TRANSFORM_OT_translate=translate_args,

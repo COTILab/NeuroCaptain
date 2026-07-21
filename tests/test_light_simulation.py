@@ -292,15 +292,6 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROBE_CONFIG_PATH = os.path.join(TESTS_DIR, "test_probe_config.json")
 COLIN27_5L_MAT_PATH = os.path.join(TESTS_DIR, "colin27_5layer_coarse.mat")
 
-# Empirically-derived alignment: the 5-layer mesh is centered on its own
-# volumetric-node centroid by import_layered_head_model(), which doesn't
-# coincide with the Colin27 head surface's origin. Matches the manual
-# bpy.ops.transform.translate(value=(-0, -0, -31.5246),
-# constraint_axis=(False, False, True)) fix - Z-only, so a direct
-# location.z mutation is exactly equivalent and avoids a context-dependent
-# transform op.
-FIVE_LAYER_Z_ALIGNMENT_OFFSET = -31.5246
-
 EXPECTED_NUM_SOURCES = 9
 EXPECTED_NUM_DETECTORS = 8
 
@@ -435,9 +426,10 @@ class RealisticLightSensitivityTest(unittest.TestCase):
         self.assertGreater(len(head_surface.data.polygons), 0)
         self.assertGreater(len(cortex.data.polygons), 0)
 
-        # Align the imported 5-layer mesh with the Colin27 head surface.
-        head_surface.location.z += FIVE_LAYER_Z_ALIGNMENT_OFFSET
-        cortex.location.z += FIVE_LAYER_Z_ALIGNMENT_OFFSET
+        # import_layered_head_model() now aligns Head_Surface_5L/Brain_Cortex_5L
+        # onto headmesh's own volume centroid itself (see
+        # layered_mesh_manager.py's use of utils.compute_volume_centroid_world) -
+        # no manual correction needed here anymore.
 
         settings = bpy.context.scene.neurocaptain_settings
         settings.mmc_use_gpu = True

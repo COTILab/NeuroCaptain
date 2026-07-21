@@ -71,6 +71,16 @@ class geo_nodes(Operator):
             node_tree, "GeometryNodeMeshBoolean", 1500, 300, self
         )
         mesh_boolean.operation = "DIFFERENCE"
+        # The Mesh Boolean node's "solver" property doesn't exist at all on
+        # 3.4/3.6 (they always used a single algorithm); 4.0+ added a choice
+        # between EXACT and FLOAT, defaulting to FLOAT - which was found (via
+        # direct testing) to be measurably less robust than 3.4/3.6's
+        # original behavior for this node's ~79-simultaneous-cuts case
+        # (silently merging/dropping most of the landmark holes instead of
+        # keeping them distinct). EXACT matches the older, always-worked
+        # behavior.
+        if hasattr(mesh_boolean, "solver"):
+            mesh_boolean.solver = "EXACT"
 
         global sample_nearest_surface
         sample_nearest_surface, node_x_location = self.create_node(

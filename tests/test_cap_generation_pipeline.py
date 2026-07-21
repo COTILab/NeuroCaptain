@@ -432,7 +432,9 @@ class CapGenerationPipelineTest(unittest.TestCase):
         )
 
         bpy.context.view_layer.objects.active = head
-        result = bpy.ops.braincapgen.export_mesh(filename=self.export_filename)
+        result = bpy.ops.braincapgen.export_mesh(
+            filepath=os.path.join(self._export_dir(), self.export_filename)
+        )
         self.assertEqual(result, {"FINISHED"})
 
         export_path = os.path.join(self._export_dir(), self.export_filename)

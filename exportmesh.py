@@ -1,3 +1,4 @@
+import os
 import bpy
 from bpy_extras.io_utils import ExportHelper
 from bpy.props import StringProperty
@@ -47,6 +48,7 @@ class exportmesh(bpy.types.Operator, ExportHelper):
             "MeshVertex3": v,
             "MeshTri3": f,
         }
+        os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
         jd.save(meshdata, self.filepath)
         self.report({"INFO"}, f"Exported mesh to: {self.filepath}")
 

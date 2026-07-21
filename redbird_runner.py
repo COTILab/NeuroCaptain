@@ -444,6 +444,22 @@ def run_redbird_simulation():
     if 'face' in cfg:
         print(f"    face: shape={cfg['face'].shape} dtype={cfg['face'].dtype} range=[{cfg['face'].min()},{cfg['face'].max()}]")
 
+    # Diagnostic: verify source/detector points actually land inside a
+    # cropped-mesh tetrahedron. redbirdpy's femrhs() silently zeroes out an
+    # optode's RHS column (rather than raising) if its inward-displaced
+    # position (srcpos/detpos + srcdir/detdir * 1/mu_tr) falls outside every
+    # element of cfg['elem'] - if that happens for all sources at once, the
+    # forward solve returns exactly phi=0.0 everywhere with no other error.
+    try:
+        _, loc_diag, _, optode_diag = forward.femrhs(cfg, sd)
+        n_missed = int(np.isnan(loc_diag).sum())
+        print(f"    femrhs: {len(loc_diag) - n_missed}/{len(loc_diag)} optodes landed inside a mesh element ({n_missed} missed)")
+        if n_missed > 0:
+            missed_idx = np.where(np.isnan(loc_diag))[0]
+            print(f"    missed optode positions: {optode_diag[missed_idx].tolist()}")
+    except Exception as e:
+        print(f"    femrhs diagnostic failed: {e}")
+
     # Forward solve — phi shape: (nn_crop, ns)
     print("\n1. Forward simulation...")
     t0 = time.time()

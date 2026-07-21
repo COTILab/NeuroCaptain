@@ -1,22 +1,16 @@
 import bpy
 from bpy.types import Operator
-from bpy.props import EnumProperty
 import bmesh
-
-enum_action = [
-    ("REFERENCE_POINT", "reference_point", "select Nz vertice, then press okay"),
-    (
-        "CIRCUMFERENC",
-        "place_cutouts",
-        "place the cutouts in generic locations (can be altered by user)",
-    ),
-]
 
 
 class circumference_calc(Operator):
-    bl_label = "Calculate cap circumference"
+    bl_label = "Calculate Cap Circumference"
     bl_idname = "neurocaptain.circumference"
-    bl_description = "Estimate the circumference of the cap model"
+    bl_description = (
+        "Estimate the circumference of the cap model - first select the "
+        "topmost vertex on headmesh.001 in Edit Mode (unhide it in the "
+        "outliner if needed)"
+    )
 
     def execute(self, context):
         try:
@@ -34,7 +28,14 @@ class circumference_calc(Operator):
             obj.name = "headcopy"
             obj.data.name = "headcopy"
         # head_dup.name = "headcopy"
-        self.reference_point(context=context)
+        vselect = self.reference_point(context=context)
+        if len(vselect) == 0:
+            self.report(
+                {"ERROR"},
+                "No vertex selected on headmesh.001 - unhide it in the outliner, "
+                "select its topmost vertex in Edit Mode, then run this again",
+            )
+            return {"CANCELLED"}
         self.place_cube(context=context)
         self.boolean_cut(context=context)
         self.measure(context=context)

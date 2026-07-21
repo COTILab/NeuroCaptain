@@ -66,17 +66,31 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
         default="CAPGEN",
     )
     sd_max_distance: bpy.props.FloatProperty(
-        name="Max SD Distance (mm)", default=60.0, min=10.0, max=150.0, step=5, precision=1
+        name="Max SD Distance (mm)",
+        description="Maximum source-detector distance to treat as a valid channel",
+        default=60.0, min=10.0, max=150.0, step=5, precision=1,
     )
     smooth_iterations: bpy.props.IntProperty(
-        name="Smoothing Iterations", default=5, min=0, max=20
+        name="Smoothing Iterations",
+        description="Number of smoothing passes applied to the sensitivity map before display",
+        default=5, min=0, max=20,
     )
     # MMC
     mmc_nphoton: bpy.props.IntProperty(
-        name="Photons", default=1000, min=100, max=10000000, step=1000
+        name="Photons",
+        description="Number of photon packets to simulate - more reduces noise but takes longer",
+        default=1000, min=100, max=10000000, step=1000,
     )
-    mmc_use_gpu: bpy.props.BoolProperty(name="Use GPU", default=True)
-    mmc_gpu_id:  bpy.props.StringProperty(name="GPU ID", default="01")
+    mmc_use_gpu: bpy.props.BoolProperty(
+        name="Use GPU",
+        description="Run MMC on GPU via OpenCL (uncheck to use CPU mode)",
+        default=True,
+    )
+    mmc_gpu_id:  bpy.props.StringProperty(
+        name="GPU ID",
+        description="OpenCL platform/device ID string (see pmmc/mcx documentation for your GPU)",
+        default="01",
+    )
     # Sensitivity colormap range (shared by MMC and Redbird)
     viz_custom_range: bpy.props.BoolProperty(
         name="Custom Colormap Range",
@@ -96,13 +110,19 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
     # Redbird
     redbird_mode: bpy.props.EnumProperty(
         name="Mode",
-        items=[('CW', "Continuous Wave", ""), ('FD', "Frequency Domain", "")],
+        description="Continuous Wave (steady-state) or Frequency Domain (modulated) forward model",
+        items=[
+            ('CW', "Continuous Wave", "Steady-state (DC) light source"),
+            ('FD', "Frequency Domain", "Modulated light source at a set frequency"),
+        ],
         default='CW',
     )
-    redbird_frequency:          bpy.props.FloatProperty(name="Frequency (MHz)",       default=70.0, min=0.0,  max=1000.0, step=10,  precision=1)
+    redbird_frequency:          bpy.props.FloatProperty(name="Frequency (MHz)",       default=70.0, min=0.0,  max=1000.0, step=10,  precision=1,
+                                    description="Modulation frequency, used in Frequency Domain mode")
     redbird_crop_margin:         bpy.props.FloatProperty(name="Crop Margin (mm)",       default=10.0, min=5.0,  max=50.0,   step=5,   precision=1,
                                     description="mm to extend beyond optode bounding box on all sides")
-    redbird_min_depth:           bpy.props.FloatProperty(name="Min Depth (mm)",        default=2.0,  min=0.5,  max=10.0,   step=0.5, precision=1)
+    redbird_min_depth:           bpy.props.FloatProperty(name="Min Depth (mm)",        default=2.0,  min=0.5,  max=10.0,   step=0.5, precision=1,
+                                    description="Minimum optode penetration depth into the mesh")
     redbird_max_iter:    bpy.props.IntProperty(  name="Max Iterations",   default=10,   min=1,   max=10000,
                              description="Maximum CG solver iterations for the FEM forward solve")
     redbird_lambda:      bpy.props.FloatProperty(name="Regularization \u03bb", default=1e-6, min=1e-12, max=1.0, precision=8,
@@ -110,21 +130,26 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
     # Schematic
     schematic_landmark_tier: bpy.props.EnumProperty(
         name="Landmarks",
+        description="Overlay a 10-20 system landmark layer on the 2D schematic",
         items=[
-            ("NONE", "None",  ""),
-            ("1020", "10-20", ""),
-            ("1010", "10-10", ""),
-            ("105",  "10-5",  ""),
+            ("NONE", "None",  "No landmark overlay"),
+            ("1020", "10-20", "Overlay the 10-20 landmark system"),
+            ("1010", "10-10", "Overlay the 10-10 landmark system"),
+            ("105",  "10-5",  "Overlay the 10-5 landmark system"),
         ],
         default="NONE",
         update=lambda self, ctx: bpy.ops.neurocaptain.refresh_2d_schematic(),
     )
     schematic_show_channels: bpy.props.BoolProperty(
-        name="Channels", default=True,
+        name="Channels",
+        description="Draw source-detector channel lines on the 2D schematic",
+        default=True,
         update=lambda self, ctx: bpy.ops.neurocaptain.refresh_2d_schematic(),
     )
     schematic_show_lm_labels: bpy.props.BoolProperty(
-        name="Landmark Labels", default=False,
+        name="Landmark Labels",
+        description="Show landmark name labels on the 2D schematic overlay",
+        default=False,
         update=lambda self, ctx: bpy.ops.neurocaptain.refresh_2d_schematic(),
     )
 
@@ -168,13 +193,13 @@ class NEUROCAPTAIN_OT_import_layered_mesh(bpy.types.Operator):
 # ── Flexible (N-layer) mesh import ──────────────────────────────────────────
 
 _LAYER_ROLE_ITEMS = [
-    ('scalp',        "Scalp",        ""),
-    ('skull',        "Skull",        ""),
-    ('csf',          "CSF",          ""),
-    ('gray_matter',  "Gray Matter",  ""),
-    ('white_matter', "White Matter", ""),
-    ('other',        "Other",        ""),
-    ('custom',       "Custom...",    ""),
+    ('scalp',        "Scalp",        "This layer is the scalp/skin"),
+    ('skull',        "Skull",        "This layer is the skull"),
+    ('csf',          "CSF",          "This layer is cerebrospinal fluid"),
+    ('gray_matter',  "Gray Matter",  "This layer is gray matter"),
+    ('white_matter', "White Matter", "This layer is white matter"),
+    ('other',        "Other",        "Tissue type not listed above"),
+    ('custom',       "Custom...",    "Type your own role name below"),
 ]
 _MAX_FLEXIBLE_LAYERS = 8
 
@@ -249,9 +274,12 @@ class NEUROCAPTAIN_OT_define_layers(bpy.types.Operator):
 
     __annotations__ = dict(__annotations__)
     for _i in range(_MAX_FLEXIBLE_LAYERS):
-        __annotations__[f'name_{_i}'] = bpy.props.StringProperty(name="Name", default="")
-        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(name="Role", items=_LAYER_ROLE_ITEMS, default='other')
-        __annotations__[f'custom_{_i}'] = bpy.props.StringProperty(name="Custom Role", default="")
+        __annotations__[f'name_{_i}'] = bpy.props.StringProperty(
+            name="Name", description="Display name for this tissue layer", default="")
+        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(
+            name="Role", description="Tissue type this layer represents", items=_LAYER_ROLE_ITEMS, default='other')
+        __annotations__[f'custom_{_i}'] = bpy.props.StringProperty(
+            name="Custom Role", description="Role name to use when Role is set to Custom...", default="")
     del _i
 
     def _label_ids(self):
@@ -325,6 +353,12 @@ class NEUROCAPTAIN_OT_setup_mmc(bpy.types.Operator):
         'g':   'Anisotropy (g)',
         'n':   'Ref Index (n)',
     }
+    _PARAM_DESCRIPTIONS = {
+        'mua': 'Absorption coefficient (1/mm)',
+        'mus': 'Reduced scattering coefficient (1/mm)',
+        'g':   'Scattering anisotropy factor (0-1)',
+        'n':   'Refractive index',
+    }
     _LAYER_DEFAULTS = {
         1: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
         2: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
@@ -336,7 +370,8 @@ class NEUROCAPTAIN_OT_setup_mmc(bpy.types.Operator):
     for _l, _lname in enumerate(_LAYER_NAMES, 1):
         for _p in ('mua', 'mus', 'g', 'n'):
             __annotations__[f'layer{_l}_{_p}'] = bpy.props.FloatProperty(
-                name=_PARAM_LABELS[_p], default=_LAYER_DEFAULTS[_l][_p],
+                name=_PARAM_LABELS[_p], description=_PARAM_DESCRIPTIONS[_p],
+                default=_LAYER_DEFAULTS[_l][_p],
                 min=0.0, max=100.0, precision=4,
             )
 
@@ -400,6 +435,21 @@ class NEUROCAPTAIN_OT_run_mmc(bpy.types.Operator):
     bl_label  = "Run MMC"
     bl_options = {'REGISTER', 'UNDO'}
 
+    def invoke(self, context, event):
+        # MMC has no timeout yet - if the OpenCL/GPU setting is wrong for
+        # this machine, this can freeze Blender until force-quit. Prompt to
+        # save first so a freeze doesn't cost unsaved work. Using
+        # invoke_props_dialog + draw() rather than invoke_confirm's
+        # message= kwarg, which doesn't exist on Blender 3.4's
+        # WindowManager.invoke_confirm (confirmed via real testing).
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="MMC may take a while, and can freeze Blender if the")
+        layout.label(text="GPU/OpenCL setting doesn't match this machine.")
+        layout.label(text="Save your work first!", icon='ERROR')
+
     def execute(self, context):
         if not lmm.is_mesh_loaded():
             self.report({'ERROR'}, "Import 5-layer mesh first.")
@@ -455,6 +505,18 @@ class NEUROCAPTAIN_OT_setup_redbird(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     # Optical properties per layer (5 layers × 4 params)
+    _PARAM_LABELS = {
+        'mua': 'Absorb (mua)',
+        'mus': 'Scatter (mus)',
+        'g':   'Anisotropy (g)',
+        'n':   'Ref Index (n)',
+    }
+    _PARAM_DESCRIPTIONS = {
+        'mua': 'Absorption coefficient (1/mm)',
+        'mus': 'Reduced scattering coefficient (1/mm)',
+        'g':   'Scattering anisotropy factor (0-1)',
+        'n':   'Refractive index',
+    }
     _LAYER_DEFAULTS = {
         1: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
         2: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
@@ -466,7 +528,8 @@ class NEUROCAPTAIN_OT_setup_redbird(bpy.types.Operator):
     for _l in range(1, 6):
         for _p in ('mua', 'mus', 'g', 'n'):
             __annotations__[f'layer{_l}_{_p}'] = bpy.props.FloatProperty(
-                name=f'L{_l} {_p}', default=_LAYER_DEFAULTS[_l][_p],
+                name=_PARAM_LABELS[_p], description=_PARAM_DESCRIPTIONS[_p],
+                default=_LAYER_DEFAULTS[_l][_p],
                 min=0.0, max=100.0, precision=4,
             )
 
@@ -535,6 +598,19 @@ class NEUROCAPTAIN_OT_run_redbird(bpy.types.Operator):
     bl_idname = "neurocaptain.run_redbird"
     bl_label  = "Run Redbird"
     bl_options = {'REGISTER', 'UNDO'}
+
+    def invoke(self, context, event):
+        # Redbird can take a while on large meshes. Prompt to save first so
+        # a very long run doesn't cost unsaved work in the meantime. Using
+        # invoke_props_dialog + draw() rather than invoke_confirm's
+        # message= kwarg, which doesn't exist on Blender 3.4's
+        # WindowManager.invoke_confirm (confirmed via real testing).
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Redbird may take a while to run on large meshes.")
+        layout.label(text="Save your work first!", icon='ERROR')
 
     def execute(self, context):
         if not lmm.is_mesh_loaded():
@@ -809,7 +885,7 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
 
         # ── Transform / Export ───────────────────────────────────────────
         layout.separator()
-        layout.operator("neurocaptain.rigid_rotate_optodes",  text="Rigid Rotate Selected", icon="CON_ROTLIKE")
+        layout.operator("neurocaptain.rigid_rotate_optodes",  text="Rigid Rotate All", icon="CON_ROTLIKE")
         layout.operator("neurocaptain.export_optode_json",    text="Export Optode Config",     icon="EXPORT")
 
         # ── 2D Schematic ─────────────────────────────────────────────────
@@ -955,7 +1031,7 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
             if len(missing) > 3:
                 box.label(text=f"• ... and {len(missing) - 3} more")
             from .pkg import (InstallJData, InstallNumPy, InstallSciPy,
-                               InstallIso2Mesh, InstallPMMC, InstallRedbird,
+                               InstallIso2Mesh, InstallPMCX, InstallPMMC, InstallRedbird,
                                InstallAllDependencies, CheckDependencies)
             row = box.row()
             row.operator(InstallAllDependencies.bl_idname, text="Install All", icon="IMPORT")
@@ -966,7 +1042,9 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
             row.operator(InstallSciPy.bl_idname,    text="SciPy",    icon="FILE_TICK")
             row = box.row()
             row.operator(InstallIso2Mesh.bl_idname, text="iso2mesh", icon="FILE_TICK")
+            row.operator(InstallPMCX.bl_idname,     text="pmcx",     icon="FILE_TICK")
             row.operator(InstallPMMC.bl_idname,     text="pmmc",     icon="FILE_TICK")
+            row = box.row()
             row.operator(InstallRedbird.bl_idname,  text="redbirdpy", icon="FILE_TICK")
         else:
             from .pkg import CheckDependencies

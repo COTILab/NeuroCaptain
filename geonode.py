@@ -10,12 +10,20 @@ class geo_nodes(Operator):
     bl_idname = "braincapgen.geo_nodes"
     bl_label = "Project 10-20 Landmarks"
     bl_description = (
-        "Takes the LandmarkMesh and make cut outs at those locations on the head surface mesh"
+        "Takes the LandmarkMesh and cuts out shapes at those locations on the head surface mesh"
     )
     bl_options = {"PRESET", "UNDO"}
     bl_space_type = "VIEW_3D"
-    size_x: bpy.props.FloatProperty(name="cutout_x", default=3)
-    size_y: bpy.props.FloatProperty(name="cutout_y", default=3)
+    size_x: bpy.props.FloatProperty(
+        name="Cutout Width",
+        description="Cutout scale along X - set independently from Height for an elliptical cutout",
+        default=3,
+    )
+    size_y: bpy.props.FloatProperty(
+        name="Cutout Height",
+        description="Cutout scale along Y - set independently from Width for an elliptical cutout",
+        default=3,
+    )
 
     @staticmethod
     def link_nodes_by_mesh_socket(node_tree, from_node, to_node, type_from, type_to):

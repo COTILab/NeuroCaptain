@@ -287,10 +287,10 @@ class LightSimulationTest(unittest.TestCase):
 # values), not just that each operator returned FINISHED.
 
 COLIN27_HEAD_PATH = os.path.join(REPO_ROOT, "HeadModels", "Colin27_Atlas_scalp.bmsh")
-BRAIN1020_LANDMARK_PATH = os.path.join(REPO_ROOT, "BrainLandmarks", "brain1020_landmarks.jmsh")
+BRAIN1020_LANDMARK_PATH = os.path.join(REPO_ROOT, "ScalpLandmarks", "brain1020_landmarks.jmsh")
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROBE_CONFIG_PATH = os.path.join(TESTS_DIR, "test_probe_config.json")
-COLIN27_5L_MAT_PATH = os.path.join(TESTS_DIR, "colin27Mesh_5layers.mat")
+COLIN27_5L_MAT_PATH = os.path.join(TESTS_DIR, "colin27_5layer_coarse.mat")
 
 # Empirically-derived alignment: the 5-layer mesh is centered on its own
 # volumetric-node centroid by import_layered_head_model(), which doesn't

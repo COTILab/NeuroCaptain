@@ -241,11 +241,17 @@ def run_redbird_simulation():
     # (hide_viewport=True) at the end of a previous successful run, purely
     # so the cortex heatmap displays cleanly - but a hidden object has no
     # evaluated depsgraph data, which get_inward_normal_at_point()'s
-    # closest_point_on_mesh() call below needs. Without this, a second run
-    # fails with "RuntimeError: Object '...' has no evaluated mesh data"
-    # instead of actually running.
+    # closest_point_on_mesh() call below needs. Resetting hide_viewport alone
+    # isn't enough to fix a second run: closest_point_on_mesh() reads the
+    # object via DEG_get_evaluated_object(), and nothing forces the
+    # depsgraph to actually re-evaluate the now-visible object before that
+    # call runs (unlike interactive use, where a viewport redraw does this
+    # automatically) - so it can still report "no evaluated mesh data" even
+    # with hide_viewport already False. view_layer.update() forces that
+    # re-evaluation immediately.
     if headmesh.hide_viewport:
         headmesh.hide_viewport = False
+    bpy.context.view_layer.update()
 
     bl_verts = get_blender_vertices(headmesh)
 

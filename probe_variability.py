@@ -734,7 +734,7 @@ def _find_probe_json(subject_dir):
 def compute_m4_barycentric_consistency(subjects, optode_names,
                                        probe_json_path=None):
     """
-    M4: Barycentric consistency.
+    Barycentric consistency.
 
     Uses the registration vertex labels and weights from the probe JSON
     to reconstruct each optode's barycentric position on each subject's
@@ -1384,7 +1384,8 @@ class NEUROCAPTAIN_OT_export_subject_json_file(bpy.types.Operator, ExportHelper)
 
 
 class NEUROCAPTAIN_OT_export_subject_json(bpy.types.Operator):
-    """Export current scene optode positions to a variability analysis JSON"""
+    """Export current scene optode positions to a variability analysis JSON -
+    prompts for a Subject ID, then opens a file-save dialog"""
     bl_idname = "neurocaptain.export_subject_json"
     bl_label = "Export Subject Probe Evaluation"
     bl_options = {'REGISTER'}
@@ -1423,10 +1424,12 @@ class NEUROCAPTAIN_OT_run_variability(bpy.types.Operator):
 
     directory: StringProperty(
         name="Subject JSON Directory",
+        description="Folder containing each subject's exported probe evaluation JSON",
         subtype='DIR_PATH',
     )
     show_per_subject: BoolProperty(
         name="Show Per-Subject Positions",
+        description="Also visualize each subject's individual optode positions, not just the group summary",
         default=False,
     )
     csv_filename: StringProperty(
@@ -1436,7 +1439,7 @@ class NEUROCAPTAIN_OT_run_variability(bpy.types.Operator):
     )
     probe_json_path: StringProperty(
         name="Probe JSON",
-        description="Path to probe_config JSON with registration data (for M4). Auto-detected if left blank.",
+        description="Path to probe_config JSON with registration data for barycentric consistency. Auto-detected if left blank.",
         subtype='FILE_PATH',
     )
 
@@ -1563,7 +1566,7 @@ class NEUROCAPTAIN_OT_run_variability(bpy.types.Operator):
         print(f"  Mean M1 (landmark error): {np.mean(m1):.3f} mm")
         print(f"  Mean M2 (interoptode SD): {np.mean(m2):.3f} mm")
         print(f"  Mean M3 (bary stability): {np.mean(m3):.3f} mm")
-        print(f"  Mean M4 (bary displacement):  "
+        print(f"  Mean Barycentric Consistency (bary displacement):  "
               f"RMS: {np.mean(m4_rms):.3f} mm, "
               f"SD: {np.mean(m4_sd):.3f} mm, "
               f"Max: {np.mean(m4_max):.3f} mm, "

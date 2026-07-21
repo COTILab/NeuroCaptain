@@ -12,22 +12,22 @@ from bpy_extras.io_utils import ExportHelper
 
 
 enum_action = [
-    ("NZ_SELECT", "nz_select", "select the vertice closest to Nz, then press okay"),
-    ("LPA_SELECT", "lpa_select", "select the vertice closest to Lpa, then press okay"),
-    ("RPA_SELECT", "RPA_select", "select the vertice closest to Rpa, then press okay"),
-    ("IZ_SELECT", "iz_select", "select the vertice closest to Iz, then press okay"),
-    ("CZ_SELECT", "cz_select", "select the vertice closest to Cz, then press okay"),
+    ("NZ_SELECT", "nz_select", "Assign the currently-selected headmesh vertex as the Nz (nasion) landmark"),
+    ("LPA_SELECT", "lpa_select", "Assign the currently-selected headmesh vertex as the Lpa (left preauricular) landmark"),
+    ("RPA_SELECT", "RPA_select", "Assign the currently-selected headmesh vertex as the Rpa (right preauricular) landmark"),
+    ("IZ_SELECT", "iz_select", "Assign the currently-selected headmesh vertex as the Iz (inion) landmark"),
+    ("CZ_SELECT", "cz_select", "Assign the currently-selected headmesh vertex as the Cz (vertex/crown) landmark"),
     (
         "BRAIN1020_MESH",
         "brain1020_mesh",
-        "enter p1 and p2 corresponding to 10(p1)-20(p2) points, then press okay",
+        "Set the arc step percentages, then press OK to generate the 10-20 landmark mesh",
     ),
 ]
 
 
 class brain1020mesh(Operator):
-    bl_label = "Select vertices to calculate 10-20 points"
-    bl_description = "Click this button to generate mesh from brain landmarks "
+    bl_label = "Generate 10-20 Landmarks"
+    bl_description = "Assign Nz/Lpa/Rpa/Iz/Cz landmarks and generate the 10-20 landmark mesh"
     bl_idname = "braincapgen.brain1020mesh"
     action: EnumProperty(
         items=[
@@ -39,8 +39,18 @@ class brain1020mesh(Operator):
             ("BRAIN1020_MESH", "brain1020_mesh", "brain1020_mesh"),
         ]
     )
-    point1: bpy.props.FloatProperty(name="p1", default=10)
-    point2: bpy.props.FloatProperty(name="p2", default=10)
+    point1: bpy.props.FloatProperty(
+        name="Arc Step 1 (%)",
+        description="Percentage step along the first arc - 10 gives the 10-20 system, "
+        "smaller values (e.g. 5) give denser 10-10/10-5 systems",
+        default=10,
+    )
+    point2: bpy.props.FloatProperty(
+        name="Arc Step 2 (%)",
+        description="Percentage step along the second arc - 10 gives the 10-20 system, "
+        "smaller values (e.g. 5) give denser 10-10/10-5 systems",
+        default=10,
+    )
 
     @classmethod
     def description(cls, context, properties):
@@ -394,10 +404,15 @@ def register():
     bpy.types.Scene.iz_assigned = bpy.props.BoolProperty(name="IZ Assigned", default=False)
     bpy.types.Scene.cz_assigned = bpy.props.BoolProperty(name="CZ Assigned", default=False)
     bpy.types.Scene.save_landmark_file = bpy.props.BoolProperty(
-        name="Save Landmark File", default=False
+        name="Save Landmark File",
+        description="Also write the generated landmark mesh to disk as a .jmsh file",
+        default=False,
     )
     bpy.types.Scene.save_landmark_filepath = bpy.props.StringProperty(
-        name="Save Path", subtype='FILE_PATH', default=""
+        name="Save Path",
+        description="Where to save the landmark file",
+        subtype='FILE_PATH',
+        default="",
     )
 
 

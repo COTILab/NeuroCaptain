@@ -5,6 +5,8 @@ from pathlib import Path
 import json
 import time
 
+from .utils import recenter_on_volume_centroid, compute_volume_centroid_world
+
 try:
     import iso2mesh as i2m
     ISO2MESH_AVAILABLE = True
@@ -16,6 +18,104 @@ try:
     REDBIRD_AVAILABLE = True
 except ImportError:
     REDBIRD_AVAILABLE = False
+
+
+def _patch_iso2mesh_extractloops_bug():
+    """Patch a bug in iso2mesh.trait.extractloops (still present in the
+    latest PyPI release, 0.6.5, as of this writing) that crashes
+    slicesurf/slicesurf3 (used for brain hemisphere/landmark slicing and
+    mesh cropping) with "operands could not be broadcast together" whenever
+    a loop needs to be re-joined at both ends.
+
+    Root cause: `loops` is a plain Python list, but `lp = np.flip(loops)`
+    turns it into a numpy array; `loops[:n] + lp[:m]` then triggers numpy
+    element-wise addition (broadcasting) instead of the intended sequence
+    concatenation, which only "works" by coincidence when both slices
+    happen to have equal length. Fix: use np.concatenate explicitly.
+
+    modify.py imports extractloops by name at its own module load time
+    (`from iso2mesh.trait import ... extractloops`), so slicesurf/
+    slicesurf3 resolve it from iso2mesh.modify's own namespace at call
+    time - patching iso2mesh.trait.extractloops alone would not affect
+    them; both must be patched.
+    """
+    import numpy as _np
+
+    def extractloops(edges):
+        loops = []
+        edges = edges[edges[:, 0] != edges[:, 1], :]
+        if len(edges) == 0:
+            return loops
+
+        loops.extend(edges[0, :])
+        loophead = edges[0, 0]
+        loopend = edges[0, 1]
+        edges = _np.delete(edges, 0, axis=0)
+
+        while edges.size > 0:
+            idx = _np.concatenate(
+                [_np.where(edges[:, 0] == loopend)[0], _np.where(edges[:, 1] == loopend)[0]]
+            )
+            if len(idx) > 1:
+                idx = idx[0]
+            if not isinstance(idx, _np.ndarray):
+                idx = _np.array(idx)
+
+            if idx.size == 0:
+                idx_head = _np.concatenate(
+                    [
+                        _np.where(edges[:, 0] == loophead)[0],
+                        _np.where(edges[:, 1] == loophead)[0],
+                    ]
+                )
+                if len(idx_head) == 0:
+                    loops.append(_np.nan)
+                    loops.extend(edges[0, :])
+                    loophead = edges[0, 0]
+                    loopend = edges[0, 1]
+                    edges = _np.delete(edges, 0, axis=0)
+                else:
+                    loophead, loopend = loopend, loophead
+                    lp = _np.flip(loops)
+                    seg = _np.where(_np.isnan(lp))[0]
+                    if len(seg) == 0:
+                        loops = lp.tolist()
+                    else:
+                        # Fixed: np.concatenate instead of list + ndarray,
+                        # which triggered numpy broadcasting instead of
+                        # concatenation.
+                        loops = _np.concatenate(
+                            [loops[: len(loops) - seg[0]], lp[: seg[0]]]
+                        ).tolist()
+                continue
+
+            if idx.size == 1:
+                ed = edges[idx, :].flatten()
+                ed = ed[ed != loopend]
+                newend = ed[0]
+                if newend == loophead:
+                    loops.extend([loophead, _np.nan])
+                    edges = _np.delete(edges, idx, axis=0)
+                    if edges.size == 0:
+                        break
+                    loops.extend(edges[0, :])
+                    loophead = edges[0, 0]
+                    loopend = edges[0, 1]
+                    edges = _np.delete(edges, 0, axis=0)
+                    continue
+                else:
+                    loops.append(newend)
+                loopend = newend
+                edges = _np.delete(edges, idx, axis=0)
+
+        return _np.array(loops)
+
+    i2m.trait.extractloops = extractloops
+    i2m.modify.extractloops = extractloops
+
+
+if ISO2MESH_AVAILABLE:
+    _patch_iso2mesh_extractloops_bug()
 
 
 # =============================================================================
@@ -66,6 +166,85 @@ class LayeredMeshData:
 
 # Global instance to store mesh data
 LAYERED_MESH = LayeredMeshData()
+
+
+# =============================================================================
+# SAVE/RELOAD PERSISTENCE
+# =============================================================================
+# LAYERED_MESH only ever lives in Python memory, so it resets to empty every
+# time Blender restarts - even though the visible Head_Surface_5L/
+# Brain_Cortex_5L meshes it was built from ARE saved in the .blend file (real
+# bpy.data objects). Without this, reopening a saved file leaves the
+# simulation tools greyed out ("Import 5-layer mesh first") despite the
+# geometry being visibly right there, forcing a full re-import from the
+# original external file. Mirrors the property names lightsim_neurocaptain.
+# import_five_layer_mesh already uses for its own (older, disconnected)
+# import path, so load_mesh_and_register_optodes's existing "Priority 2"
+# fallback recognizes the same keys too.
+
+def _persist_layered_mesh_to_object():
+    """Stash LAYERED_MESH's data as custom properties on its head surface
+    object, so it survives a normal Blender save/reopen."""
+    obj = LAYERED_MESH.head_surface_obj
+    if obj is None or LAYERED_MESH.nodes is None:
+        return
+    obj['volumetric_nodes'] = LAYERED_MESH.nodes.tolist()
+    obj['volumetric_elements'] = LAYERED_MESH.elems.tolist()
+    obj['tissue_labels'] = LAYERED_MESH.tissue_labels.tolist()
+    obj['mesh_filepath'] = LAYERED_MESH.mesh_path
+    obj['num_layers'] = LAYERED_MESH.num_layers
+    obj['layer_info_json'] = json.dumps(LAYERED_MESH.layer_info)
+    obj['cortex_object_name'] = (
+        LAYERED_MESH.cortex_obj.name if LAYERED_MESH.cortex_obj else ""
+    )
+    if LAYERED_MESH.mesh_centroid is not None:
+        obj['mesh_centroid'] = list(LAYERED_MESH.mesh_centroid)
+
+
+def restore_layered_mesh_from_saved_data():
+    """Reconstruct LAYERED_MESH from custom properties saved on a head
+    surface object, if any exist in the current file (e.g. right after
+    opening a .blend saved by an earlier session). Returns True if
+    LAYERED_MESH was restored, False if there was nothing to restore.
+
+    Safe to call even when nothing was ever persisted (older .blend files
+    saved before this existed) - it just finds no matching object and
+    leaves LAYERED_MESH untouched, same as today.
+    """
+    if LAYERED_MESH.is_loaded():
+        return False  # already populated this session, don't clobber it
+
+    obj = next(
+        (o for o in bpy.data.objects if 'volumetric_nodes' in o.keys()),
+        None,
+    )
+    if obj is None:
+        return False
+
+    try:
+        LAYERED_MESH.nodes = np.array(obj['volumetric_nodes'], dtype=np.float64)
+        LAYERED_MESH.elems = np.array(obj['volumetric_elements'], dtype=np.int32)
+        LAYERED_MESH.tissue_labels = np.array(obj['tissue_labels'], dtype=np.int32)
+        LAYERED_MESH.mesh_path = obj.get('mesh_filepath')
+        LAYERED_MESH.num_layers = obj.get('num_layers', 0)
+        layer_info_json = obj.get('layer_info_json')
+        LAYERED_MESH.layer_info = (
+            {int(k): v for k, v in json.loads(layer_info_json).items()}
+            if layer_info_json else {}
+        )
+        centroid = obj.get('mesh_centroid')
+        LAYERED_MESH.mesh_centroid = np.array(centroid) if centroid else None
+        LAYERED_MESH.head_surface_obj = obj
+        cortex_name = obj.get('cortex_object_name')
+        LAYERED_MESH.cortex_obj = bpy.data.objects.get(cortex_name) if cortex_name else None
+    except Exception as e:
+        print(f"Warning: found saved layered-mesh data but failed to restore it: {e}")
+        LAYERED_MESH.__init__()
+        return False
+
+    print(f"Restored layered mesh from saved data ({LAYERED_MESH.num_layers} layers, "
+          f"{len(LAYERED_MESH.nodes):,} nodes)")
+    return True
 
 
 # =============================================================================
@@ -155,12 +334,17 @@ def create_mesh_object(name, vertices, faces, collection):
     mesh.from_pydata(vertices.tolist(), [], [list(f) for f in faces])
     mesh.update()
     
-    # link to scene temporarily for editing
+    # link to scene temporarily for editing. Deselect everything else first -
+    # Blender's multi-object edit mode would otherwise pull in whatever else
+    # happens to still be selected (e.g. headmesh, if the user clicked it in
+    # the outliner earlier), and remove_doubles/normals_make_consistent below
+    # would silently mutate that object's geometry too.
     bpy.context.collection.objects.link(obj)
+    bpy.ops.object.select_all(action='DESELECT')
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
-    
-    # clean mesh using blender 
+
+    # clean mesh using blender
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.remove_doubles(threshold=0.0001)
@@ -468,8 +652,7 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
             bpy.ops.object.select_all(action='DESELECT')
             bpy.context.view_layer.objects.active = obj
             obj.select_set(True)
-            bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='MEDIAN')
-            obj.location = (0, 0, 0)
+            recenter_on_volume_centroid(obj)
             obj.rotation_euler = (0.0, 0.0, 0.0)
             if ref:
                 obj.scale = ref.scale
@@ -498,6 +681,24 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
     if not layer_objects:
         return {'success': False, 'message': "No layer surfaces could be extracted", 'info': None}
 
+    # Snap the whole assembly onto headmesh's volume centroid (not headmesh's
+    # own pivot, which is vertex-mean-centered to match the landmark files -
+    # see recenter_on_vertex_mean) by translating every layer with the same
+    # rigid offset (anchored on the scalp layer). Volume-centroid-to-volume-
+    # centroid matching is what actually lines up two independently-meshed
+    # files of the same physical head (verified: ~1mm apart), unlike vertex
+    # mean, which drifts with how densely each file happens to sample the
+    # surface. Each layer's recenter_on_volume_centroid() call above already
+    # recentered its own pivot independently, so without this they'd each
+    # have been left at their own separate volume-centroid location instead
+    # of lining up with each other and with headmesh.
+    scalp_obj = layer_objects.get(scalp_label)
+    if scalp_obj is not None:
+        target_location = tuple(compute_volume_centroid_world(ref)) if ref else (0.0, 0.0, 0.0)
+        offset = tuple(t - s for t, s in zip(target_location, scalp_obj.location))
+        for obj in layer_objects.values():
+            obj.location = tuple(l + o for l, o in zip(obj.location, offset))
+
     head_obj = layer_objects.get(scalp_label)
     scalp_faces = extract_layer_shell(node, elem, tissue_labels, [scalp_label])
     scalp_vertex_idx = np.unique(scalp_faces.flatten())
@@ -520,6 +721,7 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
     LAYERED_MESH.mesh_centroid = mesh_centroid
     LAYERED_MESH.head_surface_obj = head_obj
     LAYERED_MESH.cortex_obj = cortex_obj
+    _persist_layered_mesh_to_object()
 
     bpy.ops.object.select_all(action='DESELECT')
     print(f"\nOK layered import ({num_layers} layers): {time.time()-t0:.1f} seconds")
@@ -668,18 +870,26 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
     # Create head surface (scalp)
     head_obj = create_mesh_object("Head_Surface_5L", node, scalp_faces, coll)
     
-    # Set origin and position
+    # Set origin, then snap onto headmesh's volume centroid - not headmesh's
+    # own pivot, which is vertex-mean-centered to match the landmark files
+    # (see recenter_on_vertex_mean). Volume-centroid-to-volume-centroid
+    # matching is what actually lines up two independently-meshed files of
+    # the same physical head (verified: ~1mm apart), unlike vertex mean,
+    # which drifts with how densely each file happens to sample the
+    # surface.
+    ref = bpy.data.objects.get(reference_obj_name)
     bpy.ops.object.select_all(action='DESELECT')
     bpy.context.view_layer.objects.active = head_obj
     head_obj.select_set(True)
-    bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='MEDIAN')
-    head_obj.location = (0, 0, 0)
-    
+    recenter_on_volume_centroid(head_obj)
+    target_location = tuple(compute_volume_centroid_world(ref)) if ref else (0.0, 0.0, 0.0)
+    offset = tuple(t - h for t, h in zip(target_location, head_obj.location))
+    head_obj.location = target_location
+
     # Match scale from reference if available, but always use zero rotation.
     # MAT/iso2mesh meshes are in RAS coordinates (same Z-up as Blender), so
     # no rotation transform is needed. Copying rotation from headmesh would
     # propagate any pre-existing rotation error on that object.
-    ref = bpy.data.objects.get(reference_obj_name)
     if ref:
         head_obj.scale = ref.scale
     head_obj.rotation_euler = (0.0, 0.0, 0.0)
@@ -703,12 +913,14 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
     # Create brain cortex
     cortex_obj = create_mesh_object("Brain_Cortex_5L", node, cortex_faces, coll)
     
-    # Match head orientation
+    # Match head orientation. Apply the same rigid offset used for head_obj
+    # (rather than independently recentering to world zero) so the cortex
+    # keeps its real position relative to the head surface.
     bpy.ops.object.select_all(action='DESELECT')
     bpy.context.view_layer.objects.active = cortex_obj
     cortex_obj.select_set(True)
-    bpy.ops.object.origin_set(type='ORIGIN_CENTER_OF_MASS', center='MEDIAN')
-    cortex_obj.location = (0, 0, 0)
+    recenter_on_volume_centroid(cortex_obj)
+    cortex_obj.location = tuple(c + o for c, o in zip(cortex_obj.location, offset))
     cortex_obj.rotation_euler = (0.0, 0.0, 0.0)
     cortex_obj.scale = head_obj.scale
     
@@ -735,6 +947,7 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
     LAYERED_MESH.mesh_centroid = mesh_centroid
     LAYERED_MESH.head_surface_obj = head_obj
     LAYERED_MESH.cortex_obj = cortex_obj
+    _persist_layered_mesh_to_object()
     
     # Deselect all
     bpy.ops.object.select_all(action='DESELECT')

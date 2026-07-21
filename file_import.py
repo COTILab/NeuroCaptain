@@ -13,8 +13,11 @@ class file_import(Operator, ImportHelper):
     """Import .stl or .off files"""
 
     bl_idname = "stlfile.invoke_import"
-    bl_label = "Import File"
-    bl_description = "Import headmesh file"
+    bl_label = "Import Mesh File"
+    bl_description = (
+        "Import a .stl/.obj/.json/.jmsh/.bmsh file - rename the result to "
+        "'headmesh' or use Label Custom afterward"
+    )
     bl_options = {"PRESET", "UNDO"}
 
     filename_ext = ".json,.jmsh,.bmsh,.stl, .off,.obj"

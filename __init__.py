@@ -58,6 +58,16 @@ class NeuroCaptainProperties(PropertyGroup):
         update=lambda self, context: bpy.ops.neurocaptain.toggle_landmark_labels()
     )
 
+
+@bpy.app.handlers.persistent
+def _restore_layered_mesh_on_load(dummy):
+    """Re-populate layered_mesh_manager.LAYERED_MESH (in-memory only, reset
+    on every Blender restart) from data saved on the head surface object, so
+    a reopened .blend doesn't need the 5-layer mesh re-imported from its
+    original external file just to run MMC/Redbird again."""
+    layered_mesh_manager.restore_layered_mesh_from_saved_data()
+
+
 def register():
     print("Registering NeuroCaptain")
     bpy.types.Scene.neurocaptain_flexible_goal_weight = bpy.props.FloatProperty(
@@ -96,14 +106,20 @@ def register():
     bpy.types.Scene.niifile = PointerProperty(type=niifile)
     bpy.types.Scene.neurocaptain = PointerProperty(type=NeuroCaptainProperties)
 
+    if _restore_layered_mesh_on_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_restore_layered_mesh_on_load)
+
 
 def unregister():
     print("Unregistering NeuroCaptain")
-    
+
+    if _restore_layered_mesh_on_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_restore_layered_mesh_on_load)
+
     # Delete scene properties first
     del bpy.types.Scene.neurocaptain
     del bpy.types.Scene.niifile
-    
+
     ui.unregister()
     probe_variability.unregister()
     optode_blender_goal.unregister()

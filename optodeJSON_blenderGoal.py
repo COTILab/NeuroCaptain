@@ -26,7 +26,7 @@ from .landmark_labels import get_landmark_labels
 class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
     """Import probe JSON and relax using Blender cloth simulation"""
     bl_idname = "neurocaptain.import_optode_json_blender_goal"
-    bl_label = "Import Probe (Blender Goals)"
+    bl_label = "Import Probe Configuration (JSON)"
     bl_options = {'REGISTER', 'UNDO'}
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")

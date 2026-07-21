@@ -70,7 +70,7 @@ def _make_installer(bl_idname, bl_label, bl_description, packages, prereqs=None)
                         all_pkgs.append(prereq_pkg)
             all_pkgs.extend(packages)
             show_error_message(
-                f"{' and '.join(all_pkgs)} installed successfully! ",
+                f"{' and '.join(all_pkgs)} installed successfully!",
                 "Installation Complete",
             )
 
@@ -171,7 +171,7 @@ InstallRedbird = _make_installer(
 class InstallAllDependencies(bpy.types.Operator):
     bl_idname = "blenderphotonics.install_all_deps"
     bl_label = "Install All Dependencies"
-    bl_description = "Install all required Python packages for BlenderPhotonics"
+    bl_description = "Install all required Python packages for NeuroCaptain"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -206,7 +206,7 @@ class InstallAllDependencies(bpy.types.Operator):
                 )
             else:
                 show_error_message(
-                    "All dependencies installed successfully! ",
+                    "All dependencies installed successfully!",
                     "Installation Complete",
                 )
 

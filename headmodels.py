@@ -92,14 +92,14 @@ if bpy.app.version < (4, 0, 0):
     addon_utils.enable("io_mesh_stl")
 
 enum_action = [
-    ("ADD_HEADMESH", "add headmesh", "Access a folder called: HeadModels"),
-    ("ADD_BRAIN1020MESH", "add brain1020mesh", "Access a folder called: BrainLandmarks"),
+    ("ADD_HEADMESH", "add headmesh", "Import a head surface mesh from the HeadModels folder"),
+    ("ADD_BRAIN1020MESH", "add brain1020mesh", "Import a ready-made 10-20/10-10/10-5 landmark mesh from the ScalpLandmarks folder"),
 ]
 
 
 class select_model(Operator, ImportHelper):
     bl_label = "Select a head model"
-    bl_description = "Access folders with head models and brain-landmark meshes"
+    bl_description = "Import head surface meshes or scalp landmark meshes"
     bl_idname = "braincapgen.select_model"
 
     action: EnumProperty(
@@ -240,10 +240,9 @@ class select_model(Operator, ImportHelper):
 
     def invoke(self, context, event):
         addon_dir = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(addon_dir, "Models")
-        obs = []
-        self.filepath = path
-        wm = context.window_manager.fileselect_add(self)
+        folder = "HeadModels" if self.action == "ADD_HEADMESH" else "ScalpLandmarks"
+        self.filepath = os.path.join(addon_dir, folder) + os.sep
+        context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
     @staticmethod
@@ -253,8 +252,8 @@ class select_model(Operator, ImportHelper):
         head = bpy.data.objects["importedmodel"]
         bpy.ops.object.select_all(action="DESELECT")
         head.select_set(True)
-        bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="MEDIAN")
-        bpy.ops.view3d.snap_selected_to_cursor(use_offset=False)
+        recenter_on_vertex_mean(head)
+        head.location = (0.0, 0.0, 0.0)
 
         head.name = "headmesh"
         head.select_set(True)
@@ -296,6 +295,24 @@ class select_model(Operator, ImportHelper):
         bpy.ops.object.select_all(action="DESELECT")
         brain.select_set(True)
         brain.name = "LandmarkMesh"
+
+        # AddMeshFromNodeFace() placed this at the 3D cursor's location.
+        # headmesh always snaps to world (0,0,0) regardless of the cursor
+        # (see add_headmesh) - LandmarkMesh needs the same fixed target, or
+        # it silently drifts away from headmesh by however far the cursor
+        # happens to be from the origin at import time.
+        brain.location = (0.0, 0.0, 0.0)
+
+        # LandmarkMesh's faces exist only so optode_connect.py's barycentric
+        # registration (landmark_mesh.data.polygons + BVHTree.FromObject) has
+        # a real surface to interpolate across - they're not meant to be
+        # looked at. Since the landmark points don't sit exactly on
+        # headmesh's surface (a few mm off in normal operation), rendering
+        # those faces solid z-fights against headmesh in the viewport.
+        # display_type='WIRE' (same pattern optode_connect.py already uses
+        # for connection objects) keeps the mesh data fully intact for the
+        # BVH/barycentric lookups while never solid-rendering it.
+        brain.display_type = 'WIRE'
 
         num_verts = len(brain.data.vertices)
 

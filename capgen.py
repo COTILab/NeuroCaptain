@@ -31,7 +31,12 @@ def _find_landmark_nz(context):
 
 
 enum_action = [
-    ("REFERENCE_POINT", "reference_point", "select Nz vertice, then press okay"),
+    (
+        "REFERENCE_POINT",
+        "reference_point",
+        "Uses the already-assigned Nz landmark if one exists (from 10-20 generation or import); "
+        "otherwise, select the Nz vertex on headmesh first",
+    ),
     (
         "PLACE_CUTOUTS",
         "place_cutouts",
@@ -56,8 +61,16 @@ class cap_generation(Operator):
     add_cylinder: BoolProperty(name="Include Ear Cutout", default=True)
 
     # Properties for BOOLEAN_CUT
-    thick: FloatProperty(name="Thickness", default=2)
-    voxel: FloatProperty(name="Voxel Size", default=0.5)
+    thick: FloatProperty(
+        name="Thickness",
+        description="Thickness of the wireframe skeleton before solidifying",
+        default=2,
+    )
+    voxel: FloatProperty(
+        name="Voxel Size",
+        description="Remesh voxel size - smaller gives more detail but is slower",
+        default=0.5,
+    )
 
     @classmethod
     def description(cls, context, properties):

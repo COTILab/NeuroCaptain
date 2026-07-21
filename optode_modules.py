@@ -42,6 +42,7 @@ class NEUROCAPTAIN_OT_create_optode_module(bpy.types.Operator):
     
     module_name: bpy.props.StringProperty(
         name="Module Name",
+        description="Name for this optode group",
         default="Module"
     )
     
@@ -76,7 +77,7 @@ class NEUROCAPTAIN_OT_create_optode_module(bpy.types.Operator):
 
 
 class NEUROCAPTAIN_OT_delete_optode_module(bpy.types.Operator):
-    """Delete selected optode module"""
+    """Delete the module currently selected in the list above"""
     bl_idname = "neurocaptain.delete_optode_module"
     bl_label = "Delete Module"
     bl_options = {'REGISTER', 'UNDO'}

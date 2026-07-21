@@ -13,8 +13,8 @@ enum_action = [
 
 class insert_shape(Operator):
     bl_idname = "braincapgen.insert_shape"
-    bl_label = "insert shape"
-    bl_description = "inserts a shape for the cutouts at the brain landmark points"
+    bl_label = "Insert Cutout Shape"
+    bl_description = "Adds a shape used for the cutouts at scalp landmark points"
     bl_options = {"REGISTER", "UNDO"}
 
     action: EnumProperty(

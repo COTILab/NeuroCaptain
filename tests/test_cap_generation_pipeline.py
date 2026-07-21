@@ -77,7 +77,7 @@ from _addon_helpers import (
 )
 
 HEAD_MODEL_PATH = os.path.join(REPO_ROOT, "HeadModels", "NDD_35-39Years_scalp.bmsh")
-LANDMARK_PATH = os.path.join(REPO_ROOT, "BrainLandmarks", "NDD_35-39_landmarks.jmsh")
+LANDMARK_PATH = os.path.join(REPO_ROOT, "ScalpLandmarks", "NDD_35-39_landmarks.jmsh")
 
 # Actual production decimate ratio - the current suite used 0.5 (lenient),
 # which never exercised the aggressive-decimation path most likely to break
@@ -114,20 +114,30 @@ MAX_NON_MANIFOLD_EDGE_RATIO = 0.05
 # fairly short cap. 8x leaves comfortable margin on both sides.
 MAX_PLAUSIBLE_CAP_ASPECT_RATIO = 8.0
 
-# Ground truth captured directly from CI: a known-working run (Blender 3.6)
-# produced exactly 246,636 faces after BOOLEAN_CUT for this exact head
-# model/decimate ratio/thickness/voxel-size combination. Blender 5.2 was
-# independently confirmed broken by manual inspection (the cap doesn't
-# look right) and produced 590,356 faces in the same CI run - ~2.4x more
-# surface area, consistent with the boolean cuts not actually removing
-# material even though modifier_apply() reports {'FINISHED'} (a "succeeded
-# but geometrically ineffective" boolean, not a hard failure the
-# _apply_modifier() check in capgen.py would catch). A tight +/-10% band
-# around the known-good count catches this cleanly without needing to
-# model the exact geometric mechanism - it's nowhere near wide enough to
-# let 590,356 through.
-EXPECTED_BOOLEAN_CUT_FACE_COUNT = 246636
-BOOLEAN_CUT_FACE_COUNT_TOLERANCE = 0.10  # +/- 10%
+# Ground truth re-captured once more after headmesh/layered-mesh centering
+# settled on its final approach: headmesh recentered on plain vertex mean
+# (matches the ScalpLandmarks/ files' own generation convention) while the
+# layered-mesh surfaces recenter on their own volume centroid and then align
+# onto headmesh's volume centroid (read-only query, not headmesh's own
+# pivot) - see utils.recenter_on_vertex_mean/recenter_on_volume_centroid/
+# compute_volume_centroid_world. Measured directly on real hardware across
+# all three versions this add-on targets, run manually end-to-end:
+#   Blender 3.4.1  -> 246,100 faces
+#   Blender 4.2.22 -> 247,690 faces
+#   Blender 5.2    -> 247,692 faces
+# These cluster within ~0.6% of each other, so one shared reference (their
+# mean) with a modest tolerance covers all three real targets with
+# comfortable margin to spare. Blender 5.2 was separately, independently
+# confirmed broken by manual inspection in an earlier run (the cap doesn't
+# look right) and produced 590,356 faces that time - ~2.4x more surface
+# area, consistent with the boolean cuts not actually removing material
+# even though modifier_apply() reports {'FINISHED'} (a "succeeded but
+# geometrically ineffective" boolean, not a hard failure the
+# _apply_modifier() check in capgen.py would catch). +/-5% comfortably
+# covers the ~0.6% real cross-version spread with margin while remaining
+# nowhere near wide enough to let 590,356 through.
+EXPECTED_BOOLEAN_CUT_FACE_COUNT = 247161
+BOOLEAN_CUT_FACE_COUNT_TOLERANCE = 0.05  # +/- 5%
 
 CREATED_OBJECT_NAMES = [
     "headmesh",

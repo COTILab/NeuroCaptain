@@ -337,6 +337,7 @@ class NEUROCAPTAIN_OT_display_landmark_labels(bpy.types.Operator):
 
     label_size: bpy.props.FloatProperty(
         name="Label Size",
+        description="Text size for landmark labels in the viewport",
         default=3.0,
         min=0.5,
         max=20.0
@@ -344,6 +345,7 @@ class NEUROCAPTAIN_OT_display_landmark_labels(bpy.types.Operator):
 
     offset_distance: bpy.props.FloatProperty(
         name="Offset Distance",
+        description="Distance to offset labels from the scalp surface, along the surface normal",
         default=1.0,
         min=-20.0,
         max=20.0
@@ -401,7 +403,14 @@ class NEUROCAPTAIN_OT_display_landmark_labels(bpy.types.Operator):
             text_obj = bpy.data.objects.new(name=f"Label_{labels[idx]}_{idx}", object_data=text_data)
             text_obj.location = label_position
             text_obj.rotation_mode = 'QUATERNION'
-            text_obj.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(surface_normal)
+            # Text curves' readable front faces local -Z, not +Z (unlike the
+            # rotationally-symmetric optode markers elsewhere in this addon
+            # that use the same rotation_difference(normal) pattern, where
+            # front/back doesn't matter) - aligning +Z here left labels
+            # facing into the head, so viewers outside saw the back of the
+            # glyphs (mirrored/backwards). Align -Z to the outward normal
+            # instead so the front faces outward.
+            text_obj.rotation_quaternion = Vector((0, 0, -1)).rotation_difference(surface_normal)
 
             text_obj.data.materials.append(label_mat)
             label_collection.objects.link(text_obj)

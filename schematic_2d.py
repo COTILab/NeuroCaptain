@@ -551,6 +551,12 @@ class NEUROCAPTAIN_OT_open_schematic(bpy.types.Operator):
     filepath:    bpy.props.StringProperty(subtype="FILE_PATH")
     filter_glob: bpy.props.StringProperty(default="*.json", options={'HIDDEN'})
 
+    @classmethod
+    def description(cls, context, properties):
+        if collect_optodes():
+            return "Generate a 2D schematic from the optodes already in the scene"
+        return "Import a probe JSON file and generate a 2D schematic from it"
+
     def invoke(self, context, event):
         if collect_optodes():
             return self.execute(context)

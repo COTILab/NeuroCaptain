@@ -1,22 +1,27 @@
 import bpy
+from bpy_extras.io_utils import ExportHelper
+from bpy.props import StringProperty
 from .utils import *
 import numpy as np
 import jdata as jd
-import os
 
 
-class exportmesh(bpy.types.Operator):
+class exportmesh(bpy.types.Operator, ExportHelper):
     bl_idname = "braincapgen.export_mesh"
-    bl_label = "Export Mesh to bmsh/jmsh"
-    bl_description = "Export mesh as bmsh/jmsh"
+    bl_label = "Export Mesh"
+    bl_description = "Export the active mesh as a .bmsh/.jmsh file"
 
-    filename: bpy.props.StringProperty(name="File Name", default=" ")
+    filename_ext = ".jmsh"
+    filter_glob: StringProperty(
+        default="*.jmsh;*.bmsh",
+        options={"HIDDEN"},
+    )
 
     def execute(self, context):
-        outputdir = GetBPWorkFolder()
-        if not os.path.isdir(outputdir):
-            os.makedirs(outputdir)
         obj = bpy.context.view_layer.objects.active
+        if obj is None:
+            self.report({"ERROR"}, "No active object to export")
+            return {"CANCELLED"}
 
         bpy.ops.object.modifier_add(type="TRIANGULATE")
         bpy.ops.object.modifier_apply(modifier="Triangulate")
@@ -42,10 +47,7 @@ class exportmesh(bpy.types.Operator):
             "MeshVertex3": v,
             "MeshTri3": f,
         }
-        jd.save(meshdata, os.path.join(outputdir, self.filename))
+        jd.save(meshdata, self.filepath)
+        self.report({"INFO"}, f"Exported mesh to: {self.filepath}")
 
         return {"FINISHED"}
-
-    def invoke(self, context, event):
-        wm = context.window_manager
-        return wm.invoke_props_dialog(self)

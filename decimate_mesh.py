@@ -4,9 +4,13 @@ from bpy.types import Operator
 
 class decimate_mesh(bpy.types.Operator):
     bl_idname = "braincapgen.decimate_mesh"
-    bl_label = "Modify Mesh Density"
-    bl_description = "modify density of mesh after choosing Nz,Lpa,Rpa)"
-    number: bpy.props.FloatProperty(name="Decimate Ratio", default=1)
+    bl_label = "Decimate Headmesh"
+    bl_description = "Reduce headmesh's face count before cutting out landmark shapes"
+    number: bpy.props.FloatProperty(
+        name="Decimate Ratio",
+        description="Fraction of faces to keep, e.g. 0.05 keeps 5%",
+        default=1,
+    )
 
     def execute(self, context):
         try:

@@ -115,7 +115,17 @@ def _patch_iso2mesh_extractloops_bug():
 
 
 if ISO2MESH_AVAILABLE:
-    _patch_iso2mesh_extractloops_bug()
+    try:
+        _patch_iso2mesh_extractloops_bug()
+    except AttributeError:
+        # Some environments have a top-level "iso2mesh" module importable
+        # (so the plain `import iso2mesh` above succeeds) that isn't actually
+        # the real py-iso2mesh package - e.g. missing its trait/modify
+        # submodules entirely. Treat that the same as "not available" rather
+        # than crashing this module's import (and therefore the whole
+        # add-on's registration) - iso2mesh-dependent features below already
+        # have fallback implementations for this case.
+        ISO2MESH_AVAILABLE = False
 
 
 # =============================================================================

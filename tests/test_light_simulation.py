@@ -263,13 +263,14 @@ class LightSimulationTest(unittest.TestCase):
 # produce any valid SD pair), this drives the exact real-world scenario:
 #
 #   select_model(ADD_HEADMESH)      -> Colin27 head surface
-#   select_model(ADD_BRAIN1020MESH) -> real 10-10+baseplane landmark set
-#                                       (brain1020_landmarks.jmsh embeds real
-#                                       labels like FCz/C1 that the probe JSON
-#                                       references, so the optode loader's
-#                                       label-based cross-system fallback
-#                                       resolves correctly even though vertex
-#                                       counts don't match exactly)
+#   select_model(ADD_BRAIN1020MESH) -> Colin27's own 10-10+baseplane landmark
+#                                       set (Colin27_Atlas_landmarks.jmsh -
+#                                       positions measured on this exact head,
+#                                       not a generic template; embeds the
+#                                       same real labels like FCz/C1 that the
+#                                       probe JSON references, so the optode
+#                                       loader's label-based cross-system
+#                                       fallback still resolves correctly)
 #   import_optode_json_blender_goal -> 9 sources / 8 detectors from a real,
 #                                       checked-in probe config
 #   import_layered_mesh             -> real Colin27 5-layer tetrahedral mesh
@@ -287,7 +288,7 @@ class LightSimulationTest(unittest.TestCase):
 # values), not just that each operator returned FINISHED.
 
 COLIN27_HEAD_PATH = os.path.join(REPO_ROOT, "HeadModels", "Colin27_Atlas_scalp.bmsh")
-BRAIN1020_LANDMARK_PATH = os.path.join(REPO_ROOT, "ScalpLandmarks", "brain1020_landmarks.jmsh")
+COLIN27_LANDMARK_PATH = os.path.join(REPO_ROOT, "ScalpLandmarks", "Colin27_Atlas_landmarks.jmsh")
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROBE_CONFIG_PATH = os.path.join(TESTS_DIR, "test_probe_config.json")
 COLIN27_5L_MAT_PATH = os.path.join(TESTS_DIR, "colin27_5layer_coarse.mat")
@@ -397,8 +398,8 @@ class RealisticLightSensitivityTest(unittest.TestCase):
 
         result = bpy.ops.braincapgen.select_model(
             action="ADD_BRAIN1020MESH",
-            filepath=BRAIN1020_LANDMARK_PATH,
-            files=[{"name": os.path.basename(BRAIN1020_LANDMARK_PATH)}],
+            filepath=COLIN27_LANDMARK_PATH,
+            files=[{"name": os.path.basename(COLIN27_LANDMARK_PATH)}],
         )
         self.assertEqual(result, {"FINISHED"})
         self.assertIsNotNone(bpy.data.objects.get("LandmarkMesh"))

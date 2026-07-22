@@ -332,6 +332,11 @@ class cap_generation(Operator):
         # stale pre-cut mesh (same root cause as redbird_runner.py's
         # view_layer.update() fix after unhiding headmesh).
         bpy.context.view_layer.update()
+        print(
+            f"[cap-gen diagnostic] after bool 3 (ear): "
+            f"verts={len(head.data.vertices)} faces={len(head.data.polygons)} "
+            f"blender={bpy.app.version_string} area={bpy.context.area.type if bpy.context.area else None}"
+        )
         self._remove_cutout_object(ear)
 
         try:
@@ -352,6 +357,10 @@ class cap_generation(Operator):
         if not self._apply_modifier(head, "bool 2"):
             return {"CANCELLED"}
         bpy.context.view_layer.update()
+        print(
+            f"[cap-gen diagnostic] after bool 2 (bottom): "
+            f"verts={len(head.data.vertices)} faces={len(head.data.polygons)}"
+        )
         self._remove_cutout_object(bottom)
 
         # This used to toggle into edit mode and delete whatever faces were
@@ -372,6 +381,11 @@ class cap_generation(Operator):
         bpy.ops.mesh.select_all(action="DESELECT")
         bpy.ops.mesh.delete(type="FACE")
         bpy.ops.object.editmode_toggle()
+        print(
+            f"[cap-gen diagnostic] after select_all(DESELECT)+delete(FACE) "
+            f"(should be a no-op - compare to 'after bool 2' above): "
+            f"verts={len(head.data.vertices)} faces={len(head.data.polygons)}"
+        )
 
         bpy.ops.object.mode_set(mode="OBJECT")
         bool_one = head.modifiers.new(type="BOOLEAN", name="bool 1")
@@ -382,6 +396,10 @@ class cap_generation(Operator):
         if not self._apply_modifier(head, "bool 1"):
             return {"CANCELLED"}
         bpy.context.view_layer.update()
+        print(
+            f"[cap-gen diagnostic] after bool 1 (face): "
+            f"verts={len(head.data.vertices)} faces={len(head.data.polygons)}"
+        )
         self._remove_cutout_object(face)
 
         try:

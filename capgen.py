@@ -419,11 +419,21 @@ class cap_generation(Operator):
         wire.use_crease = False
         if not self._apply_modifier(head, "wireframe"):
             return {"CANCELLED"}
+        bpy.context.view_layer.update()
+        print(
+            f"[cap-gen diagnostic] after wireframe (thickness={thickness}): "
+            f"verts={len(head.data.vertices)} faces={len(head.data.polygons)}"
+        )
 
         remesh = head.modifiers.new(type="REMESH", name="remesh")
         remesh.voxel_size = voxelsize
         if not self._apply_modifier(head, "remesh"):
             return {"CANCELLED"}
+        bpy.context.view_layer.update()
+        print(
+            f"[cap-gen diagnostic] after remesh (voxel_size={voxelsize}): "
+            f"verts={len(head.data.vertices)} faces={len(head.data.polygons)}"
+        )
         bpy.context.view_layer.objects.active = head
 
         return {"FINISHED"}

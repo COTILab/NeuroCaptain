@@ -367,7 +367,19 @@ class CapGenerationPipelineTest(unittest.TestCase):
             )
 
         pre_boolean_z_dimension = head.dimensions[2]
-        result = bpy.ops.braincapgen.cap_generation(action="BOOLEAN_CUT", thick=2, voxel=0.5)
+        # BOOLEAN_CUT needs a real VIEW_3D context, not just the depsgraph
+        # updates capgen.py's boolean_cut() now forces between each cut -
+        # confirmed empirically on Blender 3.6.9 in --background mode: with
+        # neither fix, cap face count came out at 302,494 (vs the ~247,161
+        # expected); with only the view_layer.update() calls, still 302,494;
+        # with both the view_layer.update() calls AND this context override
+        # together, 239,520 - within the +/-5% tolerance below. Scoped to
+        # just this one call (unlike an earlier, reverted attempt that kept
+        # an override active for the whole pipeline and segfaulted Blender
+        # 4.2 - some later step, likely export_mesh/circumference, touches
+        # real GPU-backed viewport state `--background` can't provide).
+        with bpy.context.temp_override(area=self.view3d_area, region=self.view3d_region):
+            result = bpy.ops.braincapgen.cap_generation(action="BOOLEAN_CUT", thick=2, voxel=0.5)
         self.assertEqual(result, {"FINISHED"})
         head = bpy.data.objects["headmesh"]
         self.assertGreater(len(head.data.vertices), 0)

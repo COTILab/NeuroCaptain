@@ -298,6 +298,12 @@ class cap_generation(Operator):
         bottom = bpy.data.objects["bottom_cutout"]
         ear = bpy.data.objects["ear_cutout"]
 
+        # In `blender --background`, nothing forces a depsgraph evaluation
+        # before this point the way a real interactive session's continuous
+        # viewport redraws would - make sure headmesh has actually been
+        # evaluated at least once before the first boolean modifier goes on.
+        bpy.context.view_layer.update()
+
         bpy.ops.object.mode_set(mode="OBJECT")
         bool_three = head.modifiers.new(type="BOOLEAN", name="bool 3")
         bool_three.object = ear
@@ -319,6 +325,13 @@ class cap_generation(Operator):
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 3"):
             return {"CANCELLED"}
+        # Force a depsgraph re-evaluation before the next boolean gets added -
+        # interactive use gets this for free from the viewport's continuous
+        # redraws, but plain `blender --background` never redraws at all, so
+        # without this the next modifier can end up evaluating against a
+        # stale pre-cut mesh (same root cause as redbird_runner.py's
+        # view_layer.update() fix after unhiding headmesh).
+        bpy.context.view_layer.update()
         self._remove_cutout_object(ear)
 
         try:
@@ -338,6 +351,7 @@ class cap_generation(Operator):
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 2"):
             return {"CANCELLED"}
+        bpy.context.view_layer.update()
         self._remove_cutout_object(bottom)
 
         # This used to toggle into edit mode and delete whatever faces were
@@ -367,6 +381,7 @@ class cap_generation(Operator):
         bpy.context.view_layer.objects.active = head
         if not self._apply_modifier(head, "bool 1"):
             return {"CANCELLED"}
+        bpy.context.view_layer.update()
         self._remove_cutout_object(face)
 
         try:

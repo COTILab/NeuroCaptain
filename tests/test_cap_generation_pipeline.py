@@ -137,7 +137,24 @@ MAX_PLAUSIBLE_CAP_ASPECT_RATIO = 8.0
 # covers the ~0.6% real cross-version spread with margin while remaining
 # nowhere near wide enough to let 590,356 through.
 EXPECTED_BOOLEAN_CUT_FACE_COUNT = 247161
-BOOLEAN_CUT_FACE_COUNT_TOLERANCE = 0.05  # +/- 5%
+
+# Blender 3.6 specifically has been confirmed (three identical back-to-back
+# `blender --background` runs of the exact same code against the exact same
+# CI build, same machine) to give genuinely non-deterministic results here -
+# 302,494 / 239,520 / 302,494 faces across those three runs. This isn't an
+# environment or context-handling bug (both context-override and
+# view_layer.update() variants produced both outcomes); it traces back to
+# decimate_mesh()'s aggressive 0.05 ratio having non-deterministic tie-
+# breaking for equal-cost edge collapses somewhere in Blender 3.6's own
+# internals (pre-4.0 decimate/boolean implementation), which the fine 0.5mm
+# voxel remesh then amplifies from a small topology difference into a large
+# face-count swing. The Z-dimension-shrink and non-manifold-ratio checks
+# below still pass consistently regardless of which outcome a given run
+# hits, so the cap is geometrically fine either way - only this exact face
+# count is unstable on 3.6. +/-25% comfortably covers both observed outcomes
+# (302,494 is +22.4% over the reference) while still catching a real boolean
+# no-op regression like the 590,356-face Blender 5.2 case above.
+BOOLEAN_CUT_FACE_COUNT_TOLERANCE = 0.25 if bpy.app.version < (4, 0, 0) else 0.05
 
 CREATED_OBJECT_NAMES = [
     "headmesh",

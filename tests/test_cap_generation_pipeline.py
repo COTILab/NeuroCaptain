@@ -245,25 +245,12 @@ class CapGenerationPipelineTest(unittest.TestCase):
             self.view3d_area, "no VIEW_3D area found in factory-startup screen"
         )
 
-        # Keep a real VIEW_3D context active for the whole pipeline, not just
-        # this first call - capgen.py's BOOLEAN_CUT step internally calls
-        # bpy.ops.object.mode_set()/editmode_toggle()/mesh.delete(), which,
-        # like view3d.snap_selected_to_cursor() below, can behave differently
-        # (without necessarily raising an error) when bpy.context has no
-        # area/region at all, which is what plain `--background` mode leaves
-        # it as once the previous narrower `with` block here exited. That gap
-        # reproduced a Blender-3.6-only cap face-count regression (302,514
-        # instead of the expected ~247,161) that never showed up manually,
-        # since real interactive/GUI runs always have a genuine context.
-        ctx_override = bpy.context.temp_override(area=self.view3d_area, region=self.view3d_region)
-        ctx_override.__enter__()
-        self.addCleanup(ctx_override.__exit__, None, None, None)
-
-        result = bpy.ops.braincapgen.select_model(
-            action="ADD_HEADMESH",
-            filepath=HEAD_MODEL_PATH,
-            files=[{"name": os.path.basename(HEAD_MODEL_PATH)}],
-        )
+        with bpy.context.temp_override(area=self.view3d_area, region=self.view3d_region):
+            result = bpy.ops.braincapgen.select_model(
+                action="ADD_HEADMESH",
+                filepath=HEAD_MODEL_PATH,
+                files=[{"name": os.path.basename(HEAD_MODEL_PATH)}],
+            )
         self.assertEqual(result, {"FINISHED"})
         head = bpy.data.objects.get("headmesh")
         head_dup = bpy.data.objects.get("headmesh.001")

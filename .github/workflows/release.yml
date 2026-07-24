@@ -1,0 +1,141 @@
+name: Package Release
+
+# Builds a self-contained, portable Blender + NeuroCaptain bundle so users can
+# download, extract, and start using it immediately - no separate Blender
+# install, no manual "Install Add-on", no manual pip installs.
+#
+# Targets Blender 4.2 (LTS) specifically: _libs/ (jdata, pmcx, pmmc,
+# sparse_numba + DLLs, already checked into this repo) is precompiled for
+# cp311-win_amd64, matching Blender 4.2/5.0/5.2's bundled Python 3.11 - not
+# 3.6, which bundles Python 3.10. 4.2 is the LTS release README.md already
+# recommends first.
+#
+# Only runs on version tags (v*), so ordinary pushes only run the test suite
+# in blender-tests.yml. Windows-only for now, matching _libs/'s platform-
+# specific binaries - macOS/Linux portable bundles would need their own
+# precompiled pmcx/pmmc wheels before this can extend to those runners.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-portable-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    # Job-level (not step-level) so the "Upload to lab server" step's own
+    # `if:` can actually see it - a step's `if:` is evaluated before that
+    # same step's own `env:` block is applied, so it would always read as
+    # unset if defined there instead.
+    env:
+      NEUROCAPTAIN_SERVER: ${{ secrets.NEUROCAPTAIN_SERVER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version
+        run: |
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF#refs/tags/v}"
+          else
+            ver="0.0.0-dev"
+          fi
+          echo "VERSION=$ver" >> "$GITHUB_ENV"
+          echo "packaging version $ver"
+
+      # Leaves a portable Blender install at ../blender (sibling of the
+      # checked-out repo) and adds it to PATH - same action blender-tests.yml
+      # already uses, so this is a proven, already-working download path.
+      - name: Install Blender 4.2 (portable)
+        uses: bradyajohnston/setup-blender@v5
+        with:
+          version: "4.2"
+
+      - name: Locate Blender's bundled Python
+        run: |
+          BLENDER_PY_FILE="$RUNNER_TEMP/blender_py_path.txt"
+          rm -f "$BLENDER_PY_FILE"
+          blender --background --factory-startup --python-expr "import sys, os; open(os.path.join(os.environ['RUNNER_TEMP'], 'blender_py_path.txt'), 'w').write(sys.executable)"
+          BLENDER_PY=$(cat "$BLENDER_PY_FILE")
+          echo "BLENDER_PY=$BLENDER_PY" >> "$GITHUB_ENV"
+          echo "BLENDER_DIR=$(dirname "$(which blender)")" >> "$GITHUB_ENV"
+
+      # Copies exactly the files git tracks (so nothing untracked/__pycache__
+      # sneaks in) except tests/ and repo-management-only directories that a
+      # shipped add-on has no use for.
+      - name: Copy add-on into portable Blender's addons folder
+        run: |
+          ADDON_DEST="$BLENDER_DIR/4.2/scripts/addons/NeuroCaptain"
+          mkdir -p "$ADDON_DEST"
+          git archive HEAD -- . ':!tests' ':!.github' ':!.claude' ':!.gitignore' ':!docs' ':!script' \
+            | tar -x -C "$ADDON_DEST"
+          ls "$ADDON_DEST"
+
+      # Matches pkg.py's InstallAllDependencies operator exactly (the add-on's
+      # own in-app "Install All Dependencies" button) so a user who unzips this
+      # bundle never needs to click it - --target the same sibling "modules"
+      # folder __init__.py already checks and adds to sys.path.
+      - name: Pre-install remaining Python dependencies into modules/
+        run: |
+          "$BLENDER_PY" -m ensurepip --upgrade
+          "$BLENDER_PY" -m pip install --upgrade pip
+          MODULES_DIR="$BLENDER_DIR/4.2/scripts/addons/modules"
+          mkdir -p "$MODULES_DIR"
+          # PYBJDATA_NO_EXTENSION avoids needing a C compiler toolchain for
+          # bjdata's optional extension (iso2mesh pulls bjdata in automatically).
+          PYBJDATA_NO_EXTENSION=1 "$BLENDER_PY" -m pip install --target="$MODULES_DIR" \
+            jdata numpy scipy iso2mesh pmcx sparse_numba pmmc redbirdpy
+
+      # Bakes "NeuroCaptain enabled" into this portable copy's own preferences,
+      # so it's already active the first time a user launches blender.exe -
+      # no "Edit > Preferences > Add-ons" step needed.
+      - name: Enable NeuroCaptain by default
+        run: |
+          blender --background --factory-startup --python-exit-code 1 --python-expr "
+          import bpy
+          bpy.ops.preferences.addon_enable(module='NeuroCaptain')
+          bpy.ops.wm.save_userpref()
+          "
+
+      - name: Zip portable bundle
+        run: |
+          ZIP_NAME="NeuroCaptain-Portable-Blender4.2-Windows-x64-v${VERSION}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          cd "$BLENDER_DIR/.."
+          7z a -tzip "$GITHUB_WORKSPACE/$ZIP_NAME" blender >/dev/null
+          cd "$GITHUB_WORKSPACE"
+          ls -lh "$ZIP_NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neurocaptain-portable-windows
+          path: ${{ env.ZIP_NAME }}
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_NAME }}
+
+      # No-ops until NEUROCAPTAIN_SERVER (and the other three secrets below)
+      # are actually set - ask your PI/sysadmin for SFTP host/user/key/path,
+      # then: gh secret set NEUROCAPTAIN_SERVER --body "<host>"
+      #       gh secret set NEUROCAPTAIN_SERVER_USER --body "<user>"
+      #       gh secret set NEUROCAPTAIN_SERVER_SSH_KEY < path/to/private_key
+      #       gh secret set NEUROCAPTAIN_SERVER_PATH --body "<remote dir>"
+      # Once set, this step activates automatically - no workflow edit needed.
+      - name: Upload to lab server (SFTP)
+        if: ${{ env.NEUROCAPTAIN_SERVER != '' }}
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
+        with:
+          server: ${{ secrets.NEUROCAPTAIN_SERVER }}
+          username: ${{ secrets.NEUROCAPTAIN_SERVER_USER }}
+          ssh_private_key: ${{ secrets.NEUROCAPTAIN_SERVER_SSH_KEY }}
+          local_path: ${{ env.ZIP_NAME }}
+          remote_path: ${{ secrets.NEUROCAPTAIN_SERVER_PATH }}

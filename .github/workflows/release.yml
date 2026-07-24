@@ -98,6 +98,15 @@ jobs:
         run: |
           blender --background --factory-startup --python-exit-code 1 --python-expr "
           import bpy
+          # This Blender process's addon-module list was already built at
+          # startup, before the previous step placed NeuroCaptain in
+          # scripts/addons/ - addon_refresh() rescans disk so addon_enable()
+          # can actually find it (confirmed needed against CI's exact
+          # Blender 4.2.23 build; a same-version local repro attempt on
+          # 4.2.3 worked without it, so this looks like a behavior change
+          # somewhere across the 4.2.x line, not a universal requirement -
+          # but it's a safe, idempotent call regardless of version).
+          bpy.ops.preferences.addon_refresh()
           bpy.ops.preferences.addon_enable(module='NeuroCaptain')
           bpy.ops.wm.save_userpref()
           "

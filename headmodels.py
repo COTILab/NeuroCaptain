@@ -349,3 +349,84 @@ class select_model(Operator, ImportHelper):
                 "Landmark Label Warning", "ERROR")
 
         return {"FINISHED"}
+
+
+class NEUROCAPTAIN_OT_import_headmesh_from_nifti(Operator, ImportHelper):
+    """Import a head surface from a single-region NIfTI mask (e.g. head-vs-
+    background) by isosurfacing it - not a raw scan or multi-tissue
+    segmentation. For a full scalp/skull/csf/gray/white matter model, use
+    the layered NIfTI importer instead"""
+    bl_idname = "neurocaptain.import_headmesh_from_nifti"
+    bl_label = "Import Headmesh from NIfTI Mask"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filename_ext = ".nii"
+    filter_glob: StringProperty(default="*.nii;*.nii.gz", options={"HIDDEN"})
+
+    threshold: bpy.props.FloatProperty(
+        name="Threshold",
+        description="Voxels with a value above this are treated as part of the surface's region "
+                    "(0.5 is right for an already-binary 0/1 mask)",
+        default=0.5, min=0.0,
+    )
+    downsample: bpy.props.IntProperty(
+        name="Downsample Factor",
+        description="Reduce the volume's resolution by this factor before extracting the surface. "
+                    "1 = full resolution",
+        default=4, min=1, max=16,
+    )
+    decimate_ratio: bpy.props.FloatProperty(
+        name="Decimate Ratio",
+        description="Fraction of faces to keep after decimating. 1.0 skips this step",
+        default=0.5, min=0.01, max=1.0,
+    )
+
+    def execute(self, context):
+        from . import layered_mesh_manager as lmm
+
+        if not lmm.ISO2MESH_AVAILABLE:
+            self.report({'ERROR'}, "Missing dependency: iso2mesh")
+            return {'CANCELLED'}
+
+        try:
+            volume = lmm._read_nifti_volume(self.filepath)
+            if self.downsample > 1:
+                volume = volume[::self.downsample, ::self.downsample, ::self.downsample]
+            mask = (volume > self.threshold).astype(np.uint8)
+            if not mask.any():
+                self.report({'ERROR'}, f"No voxels above threshold {self.threshold} in this file - "
+                                        "check that this is the right file, or try a lower threshold")
+                return {'CANCELLED'}
+            node, elem = lmm.i2m.binsurface(mask)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to extract surface: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        faces = (elem - 1).astype(np.int32).tolist()  # binsurface is 1-indexed; Blender needs 0-indexed
+
+        # Clear any previous run's objects so this one cleanly replaces them.
+        for stale_name in ("importedmodel", "headmesh", "headmesh.001"):
+            stale = bpy.data.objects.get(stale_name)
+            if stale is not None:
+                mesh = stale.data if stale.type == 'MESH' else None
+                bpy.data.objects.remove(stale, do_unlink=True)
+                if mesh is not None and mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+
+        try:
+            AddMeshFromNodeFace(node.tolist(), faces, "importedmodel")
+            select_model.add_headmesh(context)
+            if self.decimate_ratio < 1.0:
+                bpy.ops.braincapgen.decimate_mesh(number=self.decimate_ratio)
+        except Exception as e:
+            self.report({'ERROR'}, f"Surface extracted but failed to build headmesh object: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        head = bpy.data.objects["headmesh"]
+        self.report({'INFO'}, f"Imported head surface from {os.path.basename(self.filepath)} "
+                               f"({len(head.data.vertices)} verts, {len(head.data.polygons)} faces "
+                               f"after downsample x{self.downsample}"
+                               + (f" + decimate to {self.decimate_ratio:.0%}" if self.decimate_ratio < 1.0 else "") + ")")
+        return {'FINISHED'}

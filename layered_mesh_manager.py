@@ -1,8 +1,11 @@
 import bpy
 import numpy as np
 import scipy.io as sio
+from scipy import ndimage
 from pathlib import Path
 import json
+import os
+import sys
 import time
 
 from .utils import recenter_on_volume_centroid, compute_volume_centroid_world
@@ -114,6 +117,17 @@ def _patch_iso2mesh_extractloops_bug():
     i2m.modify.extractloops = extractloops
 
 
+def _fix_iso2mesh_windows_cork_binary():
+    """surfboolean() invokes plain cork.exe, an old 32-bit build missing a
+    DLL on this machine; cork_x86-64.exe works. Point ISO2MESH_SURFBOOLEAN
+    at it if present, without touching iso2mesh's own code."""
+    if not sys.platform.startswith("win") or "ISO2MESH_SURFBOOLEAN" in os.environ:
+        return
+    candidate = i2m.mcpath("cork_x86-64", i2m.getexeext())
+    if os.path.isfile(candidate):
+        os.environ["ISO2MESH_SURFBOOLEAN"] = "cork_x86-64"
+
+
 if ISO2MESH_AVAILABLE:
     try:
         _patch_iso2mesh_extractloops_bug()
@@ -126,6 +140,12 @@ if ISO2MESH_AVAILABLE:
         # add-on's registration) - iso2mesh-dependent features below already
         # have fallback implementations for this case.
         ISO2MESH_AVAILABLE = False
+
+if ISO2MESH_AVAILABLE:
+    try:
+        _fix_iso2mesh_windows_cork_binary()
+    except AttributeError:
+        pass  # same "not really iso2mesh" case handled above
 
 
 # =============================================================================
@@ -208,7 +228,9 @@ def _persist_layered_mesh_to_object():
         LAYERED_MESH.cortex_obj.name if LAYERED_MESH.cortex_obj else ""
     )
     if LAYERED_MESH.mesh_centroid is not None:
-        obj['mesh_centroid'] = list(LAYERED_MESH.mesh_centroid)
+        # .tolist(), not list() - the latter yields raw numpy scalars, which
+        # crash Blender's ID-property assignment.
+        obj['mesh_centroid'] = np.asarray(LAYERED_MESH.mesh_centroid).tolist()
 
 
 def restore_layered_mesh_from_saved_data():
@@ -561,7 +583,306 @@ def load_layered_mesh_source(mesh_path):
     }
 
 
-def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh', layer_definitions=None):
+# =============================================================================
+# NIFTI SEGMENTED-VOLUME IMPORT (single-pass CGAL multi-domain meshing via
+# iso2mesh.cgalv2m() - see _mesh_labeled_volume())
+# =============================================================================
+
+# Canonical tissue-ID convention: 1-Scalp, 2-Skull, 3-CSF, 4-GM, 5-WM, 6-air.
+_BRAIN2MESH_LAYER_DEFINITIONS = {
+    1: {'name': 'Scalp', 'role': 'scalp'},
+    2: {'name': 'Skull', 'role': 'skull'},
+    3: {'name': 'CSF', 'role': 'csf'},
+    4: {'name': 'Gray Matter', 'role': 'gray_matter'},
+    5: {'name': 'White Matter', 'role': 'white_matter'},
+    6: {'name': 'Air Pocket', 'role': 'other'},
+}
+
+# Filename keywords used to guess a per-file tissue role (case-insensitive).
+_NIFTI_FILENAME_TISSUE_KEYWORDS = {
+    'scalp': ('scalp', 'skin'),
+    'skull': ('skull', 'bone'),
+    'csf':   ('csf',),
+    'gm':    ('graymatter', 'greymatter', 'gray_matter', 'grey_matter', 'gray', 'grey', 'gm'),
+    'wm':    ('whitematter', 'white_matter', 'white', 'wm'),
+}
+
+_BRAIN2MESH_REQUIRED_KEYS = ('wm', 'gm')
+
+# Matches _BRAIN2MESH_LAYER_DEFINITIONS' numbering.
+_SEG_KEY_TO_CANONICAL_ID = {'scalp': 1, 'skull': 2, 'csf': 3, 'gm': 4, 'wm': 5}
+# Outer-to-inner so the more specific/inner tissue wins where masks overlap.
+_CANONICAL_TISSUE_APPLY_ORDER = ('scalp', 'skull', 'csf', 'gm', 'wm')
+
+# Beyond this, a file is almost certainly a scan/probability map, not a segmentation.
+_MAX_PLAUSIBLE_SEGMENTATION_LABELS = 100
+
+_ROLE_TO_BRAIN2MESH_KEY = {
+    'scalp': 'scalp', 'skull': 'skull', 'csf': 'csf',
+    'gray_matter': 'gm', 'white_matter': 'wm',
+}
+
+# Pre-fills the role dialog only; user always confirms/edits.
+_NIFTI_OUTER_TO_INNER_GUESS = ('scalp', 'skull', 'csf', 'gray_matter', 'white_matter')
+
+
+_vendored_jnifti_module = None
+
+
+def _vendored_jnifti():
+    """Load this add-on's own vendored jdata.jnifti directly by path, so a
+    plain `import jdata` from another add-on can't shadow it with a
+    different copy."""
+    global _vendored_jnifti_module
+    if _vendored_jnifti_module is None:
+        import importlib.util
+        jnifti_path = Path(__file__).resolve().parent / "_libs" / "jdata" / "jnifti.py"
+        spec = importlib.util.spec_from_file_location("_neurocaptain_vendored_jnifti", jnifti_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _vendored_jnifti_module = module
+    return _vendored_jnifti_module
+
+
+def _read_nifti_volume(path, downsample=1):
+    """Read a .nii/.nii.gz into a plain 3D numpy array (squeezed to drop any
+    singleton time/channel axis). downsample keeps every Nth voxel per axis
+    (strided, not averaged - this is a discrete label volume)."""
+    jnii = _vendored_jnifti().nii2jnii(str(path))
+    volume = np.squeeze(np.asarray(jnii['NIFTIData']))
+    if downsample > 1:
+        volume = volume[::downsample, ::downsample, ::downsample]
+    return volume
+
+
+def _read_nifti_voxel_size_mm(path):
+    """Read a .nii/.nii.gz file's per-axis voxel size in mm."""
+    jnii = _vendored_jnifti().nii2jnii(str(path))
+    voxel_size = np.asarray(jnii['NIFTIHeader']['VoxelSize'], dtype=np.float64)
+    return voxel_size[:3]
+
+
+def guess_nifti_tissue_roles(unique_labels):
+    """Best-guess outer-to-inner role for each raw label detected in a single
+    segmented volume, for pre-filling (never silently applying) the
+    role-assignment dialog. Labels beyond the 5 known roles default to 'other'."""
+    return {
+        label: (_NIFTI_OUTER_TO_INNER_GUESS[i] if i < len(_NIFTI_OUTER_TO_INNER_GUESS) else 'other')
+        for i, label in enumerate(unique_labels)
+    }
+
+
+def _smooth_binary_mask(mask, sigma):
+    """Gaussian-blur a binary mask then re-threshold at 0.5, rounding off
+    downsampling's staircase edges. sigma <= 0 is a no-op."""
+    if sigma <= 0:
+        return mask
+    blurred = ndimage.gaussian_filter(mask.astype(np.float32), sigma=sigma)
+    return blurred > 0.5
+
+
+def match_nifti_filename_to_tissue(filename):
+    """Match a per-layer NIfTI filename against known tissue keywords.
+    Returns the brain2mesh seg-dict key ('scalp'/'skull'/'csf'/'gm'/'wm') or
+    None if no keyword matched."""
+    stem = Path(filename).stem.lower()
+    for key, keywords in _NIFTI_FILENAME_TISSUE_KEYWORDS.items():
+        for kw in sorted(keywords, key=len, reverse=True):
+            if kw in stem:
+                return key
+    return None
+
+
+def build_seg_dict_from_files_with_roles(filepaths, file_roles, downsample=1, mask_smooth=0.0):
+    """Build brain2mesh's seg dict from multiple per-tissue NIfTI files using
+    an explicit {str(filepath): role} mapping. Files sharing a role are OR'd
+    together; 'other'/unassigned files are dropped."""
+    seg = {}
+    for path in filepaths:
+        role = file_roles.get(str(path))
+        key = _ROLE_TO_BRAIN2MESH_KEY.get(role)
+        if key is None:  # 'other' / unassigned
+            continue
+        mask = _read_nifti_volume(path, downsample=downsample) > 0
+        mask = _smooth_binary_mask(mask, mask_smooth)
+        seg[key] = mask if key not in seg else (seg[key] | mask)
+
+    missing = [k for k in _BRAIN2MESH_REQUIRED_KEYS if k not in seg]
+    if missing:
+        raise ValueError(f"At least one file must be assigned to each of: {', '.join(missing)} (gray and white matter are required)")
+    empty = [k for k, mask in seg.items() if not mask.any()]
+    if empty:
+        raise ValueError(
+            f"Tissue(s) {', '.join(empty)} have no voxels left after downsampling by {downsample} "
+            "and smoothing - try a smaller downsample factor or mask_smooth"
+        )
+    return seg
+
+
+def build_seg_dict_from_single_nifti(filepath, label_roles, downsample=1, mask_smooth=0.0):
+    """Build brain2mesh's seg dict from one multi-label NIfTI volume plus a
+    {label: role} mapping. Labels sharing a role are OR'd together."""
+    volume = _read_nifti_volume(filepath, downsample=downsample)
+    seg = {}
+    for label, role in label_roles.items():
+        key = _ROLE_TO_BRAIN2MESH_KEY.get(role)
+        if key is None:  # 'other' / unassigned
+            continue
+        mask = (volume == label)
+        seg[key] = mask if key not in seg else (seg[key] | mask)
+
+    seg = {key: _smooth_binary_mask(mask, mask_smooth) for key, mask in seg.items()}
+
+    missing = [k for k in _BRAIN2MESH_REQUIRED_KEYS if k not in seg]
+    if missing:
+        raise ValueError(f"At least one label must be assigned to each of: {', '.join(missing)} (gray and white matter are required)")
+    empty = [k for k, mask in seg.items() if not mask.any()]
+    if empty:
+        raise ValueError(
+            f"Tissue(s) {', '.join(empty)} have no voxels left after downsampling by {downsample} "
+            "and smoothing - try a smaller downsample factor or mask_smooth"
+        )
+    return seg
+
+
+def _combine_seg_masks_to_labeled_volume(seg):
+    """Combine per-tissue binary masks into one uint8 volume using the
+    canonical tissue IDs, applied outer-to-inner so the more specific/inner
+    tissue wins where masks overlap."""
+    shape = next(iter(seg.values())).shape
+    combined = np.zeros(shape, dtype=np.uint8)
+    for key in _CANONICAL_TISSUE_APPLY_ORDER:
+        if key in seg:
+            combined[seg[key]] = _SEG_KEY_TO_CANONICAL_ID[key]
+    return combined
+
+
+def _mesh_labeled_volume(volume, opt=None, maxvol=100, voxel_size_mm=(1.0, 1.0, 1.0)):
+    """Tetrahedralize a labeled uint8 volume (0=background, 1-5 canonical
+    tissue IDs) via iso2mesh.cgalv2m()'s single-pass CGAL multi-domain
+    mesher. voxel_size_mm scales its output from raw voxel-index units to
+    real mm (cgalv2m() has no way to be told the real voxel size).
+
+    Returns node (x/y/z only, scaled to mm), elem (last column = tissue ID).
+    """
+    if opt is None:
+        opt = {}
+    node, elem, _face = i2m.cgalv2m(volume, opt, maxvol)
+    if node.shape[1] > 3:
+        node = node[:, :3]
+    node = node * np.asarray(voxel_size_mm, dtype=np.float64)
+    return node, elem.astype(np.int32)
+
+
+def load_layered_mesh_source_from_nifti(filepaths, label_roles=None, file_roles=None, downsample=1, mask_smooth=0.0, maxvol=100, **cfg):
+    """
+    Load a layered mesh source from segmented NIfTI volume(s) via
+    _mesh_labeled_volume(), in the same node/elem/tissue_labels shape
+    load_layered_mesh_source() produces from a .mat/.jmsh file.
+
+    label_roles ({label: role}) is required for the single-file case;
+    file_roles ({str(filepath): role}) for the multi-file case. Pass None
+    for whichever applies to get back {'needs_roles'/'needs_file_roles':
+    True, ...} so the caller can prompt the user, then call again with it
+    filled in.
+
+    Returns a dict with 'node', 'elem', 'tissue_labels', 'unique_labels',
+    'layer_definitions', or a needs_roles/needs_file_roles dict as above.
+    """
+    if not ISO2MESH_AVAILABLE:
+        raise RuntimeError("iso2mesh is required for NIfTI import. Install with: pip install iso2mesh")
+
+    if len(filepaths) > 1 and file_roles is None:
+        return {'needs_file_roles': True, 'filenames': [str(p) for p in filepaths]}
+
+    if len(filepaths) == 1 and label_roles is None:
+        volume = _read_nifti_volume(filepaths[0], downsample=downsample)
+        unique_labels = sorted(int(l) for l in np.unique(volume) if l != 0)
+        if len(unique_labels) < 2:
+            raise ValueError(
+                f"Only {len(unique_labels)} distinct tissue label(s) found in {Path(filepaths[0]).name} - "
+                "brain2mesh needs at least 2 separate regions (gray matter and white matter, at "
+                "minimum) to build a layered head model, and no role assignment can make one region "
+                "satisfy two required roles. If this is a single-region head/background mask rather "
+                "than a multi-tissue segmentation, use 'Headmesh from NIfTI Mask' (under Head Model "
+                "& Landmark Geometry) instead - that only needs one region."
+            )
+        if len(unique_labels) > _MAX_PLAUSIBLE_SEGMENTATION_LABELS:
+            raise ValueError(
+                f"{len(unique_labels)} distinct nonzero values found in {Path(filepaths[0]).name} - "
+                "that's far too many to be a tissue segmentation (a handful to a few dozen labels is "
+                "expected, e.g. scalp/skull/csf/gray/white matter). This file is likely a continuous "
+                "intensity or probability-map volume rather than a discrete labeled segmentation - "
+                "check that you selected the hard/discrete label map, not the raw scan or a tissue "
+                "probability map."
+            )
+        return {'needs_roles': True, 'unique_labels': unique_labels}
+
+    if len(filepaths) == 1:
+        seg = build_seg_dict_from_single_nifti(filepaths[0], label_roles, downsample=downsample, mask_smooth=mask_smooth)
+    else:
+        seg = build_seg_dict_from_files_with_roles(filepaths, file_roles, downsample=downsample, mask_smooth=mask_smooth)
+
+    combined_volume = _combine_seg_masks_to_labeled_volume(seg)
+    voxel_size_mm = _read_nifti_voxel_size_mm(filepaths[0]) * downsample
+    print(f"   Running single-pass CGAL multi-domain meshing on {len(seg)} tissue mask(s) "
+          f"(downsample={downsample}, mask_smooth={mask_smooth}, maxvol={maxvol}, "
+          f"voxel_size_mm={voxel_size_mm.tolist()}): {', '.join(seg.keys())}...")
+    node, elem = _mesh_labeled_volume(combined_volume, opt=cfg.get('opt'), maxvol=maxvol, voxel_size_mm=voxel_size_mm)
+    tissue_labels = elem[:, 4]
+    unique_labels = sorted(int(l) for l in np.unique(tissue_labels))
+
+    return {
+        'node': node,
+        'elem': elem,
+        'tissue_labels': tissue_labels,
+        'unique_labels': unique_labels,
+        'layer_definitions': {
+            l: _BRAIN2MESH_LAYER_DEFINITIONS.get(l, {'name': f'Layer {l}', 'role': 'other'})
+            for l in unique_labels
+        },
+    }
+
+
+def import_layered_head_model_from_nifti(filepaths, label_roles=None, file_roles=None, reference_obj_name='headmesh', downsample=1, mask_smooth=0.0, **cfg):
+    """
+    Import a layered head model from segmented NIfTI volume(s) - see
+    load_layered_mesh_source_from_nifti() for the file-count/label_roles/
+    file_roles/downsample/mask_smooth/maxvol contract. Bridges the resulting
+    mesh straight into import_layered_head_model_flexible() without
+    re-reading/re-meshing.
+    """
+    filepaths = [Path(p) for p in filepaths]
+    for p in filepaths:
+        if not p.exists():
+            return {'success': False, 'message': f"File not found: {p}", 'info': None}
+
+    try:
+        source = load_layered_mesh_source_from_nifti(
+            filepaths, label_roles=label_roles, file_roles=file_roles,
+            downsample=downsample, mask_smooth=mask_smooth, **cfg)
+    except Exception as e:
+        return {'success': False, 'message': f"Failed to load/mesh NIfTI volume(s): {e}", 'info': None}
+
+    if source.get('needs_roles'):
+        return {
+            'success': False, 'needs_roles': True, 'unique_labels': source['unique_labels'],
+            'message': 'Tissue role assignment required', 'info': None,
+        }
+    if source.get('needs_file_roles'):
+        return {
+            'success': False, 'needs_file_roles': True, 'filenames': source['filenames'],
+            'message': 'Per-file tissue role assignment required', 'info': None,
+        }
+
+    display_path = filepaths[0] if len(filepaths) == 1 else filepaths[0].parent / f"{len(filepaths)}_nifti_layer_files"
+    return import_layered_head_model_flexible(
+        display_path, reference_obj_name=reference_obj_name,
+        layer_definitions=source['layer_definitions'], source=source,
+    )
+
+
+def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh', layer_definitions=None, source=None):
     """
     Import a layered head model with an arbitrary number of tissue layers
     (fewer than the standard 5, or more), unlike import_layered_head_model()
@@ -583,9 +904,14 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
     as cortex_obj, for compatibility with the existing MMC/redbird pipeline.
 
     Args:
-        mesh_path: Path to .mat/.jmsh/.bmsh/.json mesh file
+        mesh_path: Path to .mat/.jmsh/.bmsh/.json mesh file (only read from
+            disk if `source` is not supplied; otherwise used just for display)
         reference_obj_name: Name of reference object for scale matching
         layer_definitions: optional {label: {'name':.., 'role':..}} override
+        source: optional pre-built {'node','elem','tissue_labels',
+            'unique_labels','layer_definitions'} dict, e.g. already produced
+            by a NIfTI->brain2mesh meshing pass - skips load_layered_mesh_source()
+            so that (comparatively expensive) meshing step isn't repeated.
 
     Returns:
         dict: Status dictionary with 'success', 'message', and 'info' keys
@@ -597,9 +923,6 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
     print("=" * 70)
 
     mesh_path = Path(mesh_path)
-    if not mesh_path.exists():
-        return {'success': False, 'message': f"File not found: {mesh_path}", 'info': None}
-
     if not ISO2MESH_AVAILABLE:
         return {
             'success': False,
@@ -607,11 +930,16 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
             'info': None,
         }
 
-    print(f"\n1. Loading mesh from: {mesh_path.name}")
-    try:
-        source = load_layered_mesh_source(mesh_path)
-    except Exception as e:
-        return {'success': False, 'message': f"Failed to load mesh: {e}", 'info': None}
+    if source is None:
+        if not mesh_path.exists():
+            return {'success': False, 'message': f"File not found: {mesh_path}", 'info': None}
+        print(f"\n1. Loading mesh from: {mesh_path.name}")
+        try:
+            source = load_layered_mesh_source(mesh_path)
+        except Exception as e:
+            return {'success': False, 'message': f"Failed to load mesh: {e}", 'info': None}
+    else:
+        print(f"\n1. Using pre-built mesh source ({mesh_path.name})")
 
     node = source['node']
     elem = source['elem']

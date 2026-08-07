@@ -155,7 +155,7 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     nii["datatype"] = type2str[typeidx][0]
     nii["datalen"] = type2str[typeidx][1]
     nii["voxelbyte"] = type2byte[typeidx, 1]
-    nii["endian"] = "little" if dataendian == "L" else "big"
+    nii["endian"] = dataendian
 
     if type2byte[typeidx, 1] == 0:
         nii["img"] = []
@@ -199,7 +199,9 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
                 dtype=nii["datatype"],
             )
 
-    nii["img"] = nii["img"].reshape(nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1])
+    # NIfTI stores voxel data in Fortran order (X fastest); reshape()'s
+    # default C order silently scrambles the volume's spatial layout.
+    nii["img"] = nii["img"].reshape(nii["hdr"]["dim"][1 : nii["hdr"]["dim"][0] + 1], order="F")
 
     if len(varargin) > 0 and varargin[0] == "nii":
         return nii
@@ -211,15 +213,20 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
     nii["NIFTIData"] = nii0["img"]
 
     if "extension" in nii0["hdr"] and nii0["hdr"]["extension"][0] > 0:
+        # sizeof_hdr/vox_offset are length-1 ndarrays, not plain ints; struct
+        # needs a "<"/">" prefix, not the "little"/"big" word dataendian holds.
+        sizeof_hdr = nii0["hdr"]["sizeof_hdr"].item()
+        vox_offset = nii0["hdr"]["vox_offset"].item()
+        struct_byteorder = "<" if dataendian == "little" else ">"
         if "gzdata" in locals():
             nii["NIFTIExtension"] = []
             count = 0
-            bufpos = nii0["hdr"]["sizeof_hdr"] + 4
-            while bufpos < nii0["hdr"]["vox_offset"]:
-                size = struct.unpack(dataendian + "I", gzdata[bufpos : bufpos + 4])[0] - 8
-                type = struct.unpack(dataendian + "I", gzdata[bufpos + 4 : bufpos + 8])[0]
+            bufpos = sizeof_hdr + 4
+            while bufpos < vox_offset:
+                size = struct.unpack(struct_byteorder + "I", gzdata[bufpos : bufpos + 4])[0] - 8
+                type = struct.unpack(struct_byteorder + "I", gzdata[bufpos + 4 : bufpos + 8])[0]
                 bufpos += 8
-                if bufpos + size <= nii0["hdr"]["vox_offset"]:
+                if bufpos + size <= vox_offset:
                     nii["NIFTIExtension"].append(
                         {
                             "Size": size,
@@ -231,18 +238,21 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
                 count += 1
         else:
             with open(filename, "rb") as fid:
-                fid.seek(nii0["hdr"]["sizeof_hdr"] + 4)
+                fid.seek(sizeof_hdr + 4)
                 nii["NIFTIExtension"] = []
                 count = 0
-                while fid.tell() < nii0["hdr"]["vox_offset"]:
-                    size = struct.unpack(dataendian + "I", fid.read(4))[0] - 8
-                    type = struct.unpack(dataendian + "I", fid.read(4))[0]
-                    if fid.tell() + size < nii0["hdr"]["vox_offset"]:
+                while fid.tell() < vox_offset:
+                    size = struct.unpack(struct_byteorder + "I", fid.read(4))[0] - 8
+                    type = struct.unpack(struct_byteorder + "I", fid.read(4))[0]
+                    # Always consume `size` bytes so the file position advances
+                    # even when this extension lands exactly on vox_offset.
+                    payload = fid.read(size)
+                    if fid.tell() <= vox_offset:
                         nii["NIFTIExtension"].append(
                             {
                                 "Size": size,
                                 "Type": type,
-                                "x0x5F_ByteStream_": fid.read(size),
+                                "x0x5F_ByteStream_": payload,
                             }
                         )
                     count += 1
@@ -1343,7 +1353,8 @@ def savenifti(img, filename, *args, **kwargs):
     if len(buf) not in (352, 544):
         raise ValueError(f"Incorrect nifti-1/2 header {len(buf)}")
 
-    buf += img.tobytes()
+    # Match nii2jnii()'s read side: NIfTI stores data in Fortran order.
+    buf += img.tobytes(order="F")
 
     if len(args) > 1 and not filename:
         return buf

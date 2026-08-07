@@ -1,9 +1,10 @@
 import bpy
+from pathlib import Path
 from .file_import import file_import
 from .brain1020mesh import brain1020mesh
 from .decimate_mesh import decimate_mesh
 from .shapes import insert_shape
-from .headmodels import select_model
+from .headmodels import select_model, NEUROCAPTAIN_OT_import_headmesh_from_nifti
 from .geonode import geo_nodes
 from .dual_mesh_nc import dual_mesh_NC
 from .capgen import cap_generation
@@ -326,6 +327,250 @@ class NEUROCAPTAIN_OT_define_layers(bpy.types.Operator):
             result = lmm.import_layered_head_model_flexible(
                 self.mesh_path, reference_obj_name=self.reference_obj_name,
                 layer_definitions=layer_definitions,
+            )
+            self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+            return {'FINISHED'} if result['success'] else {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
+# ── NIfTI (segmented volume) mesh import ────────────────────────────────────
+_NIFTI_ROLE_ITEMS = [
+    ('scalp',        "Scalp",             "This label is the scalp/skin"),
+    ('skull',        "Skull",             "This label is the skull"),
+    ('csf',          "CSF",               "This label is cerebrospinal fluid"),
+    ('gray_matter',  "Gray Matter",       "This label is gray matter"),
+    ('white_matter', "White Matter",      "This label is white matter"),
+    ('other',        "Other / Ignore",    "Not used for meshing (background, air, unrelated label, etc.)"),
+]
+_MAX_NIFTI_LABELS = 20
+# Translates match_nifti_filename_to_tissue()'s 'gm'/'wm' to this dialog's enum ids.
+_ROLE_ENUM_FROM_SEG_KEY = {'scalp': 'scalp', 'skull': 'skull', 'csf': 'csf', 'gm': 'gray_matter', 'wm': 'white_matter'}
+
+
+class NEUROCAPTAIN_OT_import_layered_mesh_nifti(bpy.types.Operator):
+    """Import a layered head model from a discrete tissue-segmented NIfTI
+    volume - not a raw scan or probability map. Select one file with
+    multiple tissue labels, or several files (one binary mask per tissue)"""
+    bl_idname = "neurocaptain.import_layered_mesh_nifti"
+    bl_label  = "Import Layered Mesh (NIfTI)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    directory: bpy.props.StringProperty(subtype='DIR_PATH', options={'HIDDEN', 'SKIP_SAVE'})
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
+    filter_glob: bpy.props.StringProperty(default="*.nii;*.nii.gz", options={'HIDDEN'})
+    downsample: bpy.props.IntProperty(
+        name="Downsample Factor",
+        description="Shrink the volume by this factor per axis before meshing. Higher = faster/less "
+                    "memory, less detail. 1 = full resolution",
+        default=1, min=1, max=16,
+    )
+    mask_smooth: bpy.props.FloatProperty(
+        name="Mask Smoothing",
+        description="Blurs each tissue mask before meshing to round off staircase edges. Usually leave "
+                    "at 0 - can erode thin tissue regions if raised",
+        default=0.0, min=0.0, max=5.0,
+    )
+    maxvol: bpy.props.FloatProperty(
+        name="Max Tetrahedron Volume",
+        description="Target max tetrahedral element size. Lower = denser/more detailed mesh, slower",
+        default=100.0, min=1.0, max=10000.0,
+    )
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Downsample factor to apply before meshing:", icon='INFO')
+        layout.prop(self, "downsample")
+        layout.label(text="(1 = full resolution; higher = faster/less memory, less surface detail)")
+        layout.separator()
+        layout.prop(self, "mask_smooth")
+        layout.label(text="(usually leave at 0 - can erode thin tissue regions if raised)")
+        layout.separator()
+        layout.prop(self, "maxvol")
+        layout.label(text="(lower = denser/more detailed mesh, more nodes/elements)")
+        layout.separator()
+        layout.label(text="Click OK, then choose your NIfTI file(s) in the browser that opens next.")
+
+    def execute(self, context):
+        if not self.files:
+            # Dialog OK'd but no files chosen yet - open the file browser next.
+            context.window_manager.fileselect_add(self)
+            return {'RUNNING_MODAL'}
+
+        filepaths = [str(Path(self.directory) / f.name) for f in self.files if f.name]
+        if not filepaths:
+            self.report({'ERROR'}, "No file selected")
+            return {'CANCELLED'}
+        if not lmm.ISO2MESH_AVAILABLE:
+            self.report({'ERROR'}, "Missing dependency: iso2mesh")
+            return {'CANCELLED'}
+
+        try:
+            result = lmm.import_layered_head_model_from_nifti(
+                filepaths, reference_obj_name='headmesh', downsample=self.downsample,
+                mask_smooth=self.mask_smooth, maxvol=self.maxvol)
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        if result.get('needs_roles'):
+            num_labels = len(result['unique_labels'])
+            if num_labels > _MAX_NIFTI_LABELS:
+                self.report({'ERROR'}, f"{num_labels} distinct values detected, exceeds the {_MAX_NIFTI_LABELS} supported by the tissue-role dialog - "
+                                        "this usually means the file isn't a discrete segmentation (e.g. it's a continuous "
+                                        "intensity/probability image rather than integer tissue labels)")
+                return {'CANCELLED'}
+            try:
+                bpy.ops.neurocaptain.define_nifti_roles(
+                    'INVOKE_DEFAULT',
+                    filepath=filepaths[0],
+                    reference_obj_name='headmesh',
+                    label_ids=",".join(str(i) for i in result['unique_labels']),
+                    downsample=self.downsample,
+                    mask_smooth=self.mask_smooth,
+                    maxvol=self.maxvol,
+                )
+            except RuntimeError as e:
+                self.report({'ERROR'}, str(e))
+                return {'CANCELLED'}
+            return {'FINISHED'}
+
+        if result.get('needs_file_roles'):
+            filenames = result['filenames']
+            if len(filenames) > _MAX_NIFTI_LABELS:
+                self.report({'ERROR'}, f"{len(filenames)} files selected, exceeds the {_MAX_NIFTI_LABELS} supported by the per-file role dialog")
+                return {'CANCELLED'}
+            try:
+                bpy.ops.neurocaptain.define_nifti_file_roles(
+                    'INVOKE_DEFAULT',
+                    filepaths_str="\n".join(filenames),
+                    reference_obj_name='headmesh',
+                    downsample=self.downsample,
+                    mask_smooth=self.mask_smooth,
+                    maxvol=self.maxvol,
+                )
+            except RuntimeError as e:
+                self.report({'ERROR'}, str(e))
+                return {'CANCELLED'}
+            return {'FINISHED'}
+
+        self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+        return {'FINISHED'} if result['success'] else {'CANCELLED'}
+
+
+class NEUROCAPTAIN_OT_define_nifti_file_roles(bpy.types.Operator):
+    """Assign a tissue role to each selected NIfTI file, then mesh and
+    import - each file must already be its own binary mask for one tissue"""
+    bl_idname = "neurocaptain.define_nifti_file_roles"
+    bl_label  = "Assign NIfTI File Roles"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepaths_str:      bpy.props.StringProperty(options={'HIDDEN'})  # newline-separated (paths can't contain newlines)
+    reference_obj_name: bpy.props.StringProperty(default="headmesh", options={'HIDDEN'})
+    downsample:         bpy.props.IntProperty(default=1, options={'HIDDEN'})
+    mask_smooth:        bpy.props.FloatProperty(default=0.0, options={'HIDDEN'})
+    maxvol:             bpy.props.FloatProperty(default=100.0, options={'HIDDEN'})
+
+    __annotations__ = dict(__annotations__)
+    for _i in range(_MAX_NIFTI_LABELS):
+        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(
+            name="Role", description="Tissue type this file represents", items=_NIFTI_ROLE_ITEMS, default='other')
+    del _i
+
+    def _filepaths(self):
+        return self.filepaths_str.split("\n")
+
+    def invoke(self, context, event):
+        paths = self._filepaths()
+        if len(paths) > _MAX_NIFTI_LABELS:
+            self.report({'ERROR'}, f"{len(paths)} files detected, exceeds the {_MAX_NIFTI_LABELS} supported by this dialog")
+            return {'CANCELLED'}
+        # Pre-fill from filename as a convenience guess only; not required.
+        for i, path in enumerate(paths):
+            guess = lmm.match_nifti_filename_to_tissue(Path(path).name)
+            setattr(self, f'role_{i}', _ROLE_ENUM_FROM_SEG_KEY.get(guess, 'other'))
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        paths = self._filepaths()
+        layout.label(text=f"Confirm what each of the {len(paths)} selected file(s) represents:", icon='INFO')
+        for i, path in enumerate(paths):
+            row = layout.row(align=True)
+            row.label(text=Path(path).name)
+            row.prop(self, f'role_{i}', text="")
+
+    def execute(self, context):
+        paths = self._filepaths()
+        file_roles = {path: getattr(self, f'role_{i}') for i, path in enumerate(paths)}
+        try:
+            result = lmm.import_layered_head_model_from_nifti(
+                paths, file_roles=file_roles, reference_obj_name=self.reference_obj_name,
+                downsample=self.downsample, mask_smooth=self.mask_smooth, maxvol=self.maxvol,
+            )
+            self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+            return {'FINISHED'} if result['success'] else {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
+class NEUROCAPTAIN_OT_define_nifti_roles(bpy.types.Operator):
+    """Assign a tissue role to each label found in a segmented NIfTI volume,
+    then mesh and import"""
+    bl_idname = "neurocaptain.define_nifti_roles"
+    bl_label  = "Assign NIfTI Tissue Labels"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepath:           bpy.props.StringProperty(subtype="FILE_PATH", options={'HIDDEN'})
+    reference_obj_name: bpy.props.StringProperty(default="headmesh", options={'HIDDEN'})
+    label_ids:          bpy.props.StringProperty(options={'HIDDEN'})  # comma-separated raw label values
+    downsample:         bpy.props.IntProperty(default=1, options={'HIDDEN'})  # carried over from the file-select step
+    mask_smooth:        bpy.props.FloatProperty(default=0.0, options={'HIDDEN'})  # carried over from the file-select step
+    maxvol:             bpy.props.FloatProperty(default=100.0, options={'HIDDEN'})  # carried over from the file-select step
+
+    __annotations__ = dict(__annotations__)
+    for _i in range(_MAX_NIFTI_LABELS):
+        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(
+            name="Role", description="Tissue type this label represents", items=_NIFTI_ROLE_ITEMS, default='other')
+    del _i
+
+    def _label_ids(self):
+        return [int(x) for x in self.label_ids.split(',') if x]
+
+    def invoke(self, context, event):
+        ids = self._label_ids()
+        if len(ids) > _MAX_NIFTI_LABELS:
+            self.report({'ERROR'}, f"{len(ids)} labels detected, exceeds the {_MAX_NIFTI_LABELS} supported by this dialog")
+            return {'CANCELLED'}
+        # Pre-fill with a best-guess order; user confirms/corrects below.
+        guess = lmm.guess_nifti_tissue_roles(ids)
+        for i, label_id in enumerate(ids):
+            setattr(self, f'role_{i}', guess[label_id])
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        ids = self._label_ids()
+        layout.label(text=f"No standard convention can be assumed — confirm what each of the {len(ids)} label(s) in this volume represents:", icon='INFO')
+        for i, label_id in enumerate(ids):
+            row = layout.row(align=True)
+            row.label(text=f"Label {label_id}:")
+            row.prop(self, f'role_{i}', text="")
+
+    def execute(self, context):
+        label_roles = {label_id: getattr(self, f'role_{i}') for i, label_id in enumerate(self._label_ids())}
+        try:
+            result = lmm.import_layered_head_model_from_nifti(
+                [self.filepath], label_roles=label_roles, reference_obj_name=self.reference_obj_name,
+                downsample=self.downsample, mask_smooth=self.mask_smooth, maxvol=self.maxvol,
             )
             self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
             return {'FINISHED'} if result['success'] else {'CANCELLED'}
@@ -730,6 +975,10 @@ class NEUROCAPTAIN_PT_capgen_subpanel(bpy.types.Panel):
         row = layout.row()
         row.operator(select_model.bl_idname, text="Headmesh",   icon="USER").action = "ADD_HEADMESH"
         row.operator(select_model.bl_idname, text="10-20 Mesh", icon="OUTLINER_DATA_VOLUME").action = "ADD_BRAIN1020MESH"
+        layout.operator(NEUROCAPTAIN_OT_import_headmesh_from_nifti.bl_idname,
+                         text="Headmesh from NIfTI Mask", icon="FILE_VOLUME")
+        layout.operator(NEUROCAPTAIN_OT_import_layered_mesh_nifti.bl_idname,
+                         text="Layered Mesh from NIfTI", icon="FILE_VOLUME")
 
         layout.separator()
         layout.label(text="Generate 10-20 Landmarks", icon="SHADING_SOLID")
@@ -956,6 +1205,8 @@ class NEUROCAPTAIN_PT_lightsim_subpanel(bpy.types.Panel):
             layout.operator("neurocaptain.import_layered_mesh", text="From File (.mat)", icon="IMPORT")
         layout.operator("neurocaptain.import_layered_mesh_flexible",
                          text="From File (any layer count)", icon="IMPORT")
+        layout.operator("neurocaptain.import_layered_mesh_nifti",
+                         text="From File (.nii segmented volume)", icon="IMPORT")
 
         layout.separator()
         njloader.draw_neurojson_browser(layout, context)
@@ -1067,6 +1318,10 @@ CLASSES = [
     NEUROCAPTAIN_OT_import_layered_mesh,
     NEUROCAPTAIN_OT_import_layered_mesh_flexible,
     NEUROCAPTAIN_OT_define_layers,
+    NEUROCAPTAIN_OT_import_layered_mesh_nifti,
+    NEUROCAPTAIN_OT_define_nifti_roles,
+    NEUROCAPTAIN_OT_define_nifti_file_roles,
+    NEUROCAPTAIN_OT_import_headmesh_from_nifti,
     NEUROCAPTAIN_OT_setup_mmc,
     NEUROCAPTAIN_OT_run_mmc,
     NEUROCAPTAIN_OT_setup_redbird,

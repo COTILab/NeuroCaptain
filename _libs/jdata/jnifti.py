@@ -187,7 +187,9 @@ def nii2jnii(filename, format="jnii", *varargin, **kwargs):
         if "gzdata" not in locals():
             with open(filename, "rb") as fid:
                 if isnii:
-                    fid.seek(int(nii["hdr"]["vox_offset"]))
+                    # vox_offset is a length-1 ndarray, not a plain scalar -
+                    # int() on it directly raises on newer NumPy versions.
+                    fid.seek(int(nii["hdr"]["vox_offset"].item()))
                 nii["img"] = np.frombuffer(fid.read(imgbytenum), dtype=nii["datatype"])
         else:
             nii["img"] = np.frombuffer(

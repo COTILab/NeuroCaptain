@@ -10,12 +10,20 @@ class geo_nodes(Operator):
     bl_idname = "braincapgen.geo_nodes"
     bl_label = "Project 10-20 Landmarks"
     bl_description = (
-        "Takes the LandmarkMesh and make cut outs at those locations on the head surface mesh"
+        "Takes the LandmarkMesh and cuts out shapes at those locations on the head surface mesh"
     )
     bl_options = {"PRESET", "UNDO"}
     bl_space_type = "VIEW_3D"
-    size_x: bpy.props.FloatProperty(name="cutout_x", default=3)
-    size_y: bpy.props.FloatProperty(name="cutout_y", default=3)
+    size_x: bpy.props.FloatProperty(
+        name="Cutout Width",
+        description="Cutout scale along X - set independently from Height for an elliptical cutout",
+        default=3,
+    )
+    size_y: bpy.props.FloatProperty(
+        name="Cutout Height",
+        description="Cutout scale along Y - set independently from Width for an elliptical cutout",
+        default=3,
+    )
 
     @staticmethod
     def link_nodes_by_mesh_socket(node_tree, from_node, to_node, type_from, type_to):
@@ -63,6 +71,14 @@ class geo_nodes(Operator):
             node_tree, "GeometryNodeMeshBoolean", 1500, 300, self
         )
         mesh_boolean.operation = "DIFFERENCE"
+        # Explicitly setting this node's solver to EXACT was tried and
+        # reverted: real CI testing showed it changes geo_nodes()'s output
+        # topology enough to re-expose the undefined-post-boolean-selection
+        # bug that b6893bc already fixed once for capgen.py's own boolean
+        # cuts (cap mesh collapsing to a ~10mm sliver on 4.2/5.0/5.2) - worse
+        # than the problem it was meant to solve. Manual GUI testing (the
+        # real ground truth) confirms the default solver already produces a
+        # correct cap end-to-end; leave it alone.
 
         global sample_nearest_surface
         sample_nearest_surface, node_x_location = self.create_node(

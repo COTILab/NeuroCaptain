@@ -1,9 +1,10 @@
 import bpy
+from pathlib import Path
 from .file_import import file_import
 from .brain1020mesh import brain1020mesh
 from .decimate_mesh import decimate_mesh
 from .shapes import insert_shape
-from .headmodels import select_model
+from .headmodels import select_model, NEUROCAPTAIN_OT_import_headmesh_from_nifti
 from .geonode import geo_nodes
 from .dual_mesh_nc import dual_mesh_NC
 from .capgen import cap_generation
@@ -66,17 +67,31 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
         default="CAPGEN",
     )
     sd_max_distance: bpy.props.FloatProperty(
-        name="Max SD Distance (mm)", default=60.0, min=10.0, max=150.0, step=5, precision=1
+        name="Max SD Distance (mm)",
+        description="Maximum source-detector distance to treat as a valid channel",
+        default=60.0, min=10.0, max=150.0, step=5, precision=1,
     )
     smooth_iterations: bpy.props.IntProperty(
-        name="Smoothing Iterations", default=5, min=0, max=20
+        name="Smoothing Iterations",
+        description="Number of smoothing passes applied to the sensitivity map before display",
+        default=5, min=0, max=20,
     )
     # MMC
     mmc_nphoton: bpy.props.IntProperty(
-        name="Photons", default=1000, min=100, max=10000000, step=1000
+        name="Photons",
+        description="Number of photon packets to simulate - more reduces noise but takes longer",
+        default=1000, min=100, max=10000000, step=1000,
     )
-    mmc_use_gpu: bpy.props.BoolProperty(name="Use GPU", default=True)
-    mmc_gpu_id:  bpy.props.StringProperty(name="GPU ID", default="01")
+    mmc_use_gpu: bpy.props.BoolProperty(
+        name="Use GPU",
+        description="Run MMC on GPU via OpenCL (uncheck to use CPU mode)",
+        default=True,
+    )
+    mmc_gpu_id:  bpy.props.StringProperty(
+        name="GPU ID",
+        description="OpenCL platform/device ID string (see pmmc/mcx documentation for your GPU)",
+        default="01",
+    )
     # Sensitivity colormap range (shared by MMC and Redbird)
     viz_custom_range: bpy.props.BoolProperty(
         name="Custom Colormap Range",
@@ -96,13 +111,19 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
     # Redbird
     redbird_mode: bpy.props.EnumProperty(
         name="Mode",
-        items=[('CW', "Continuous Wave", ""), ('FD', "Frequency Domain", "")],
+        description="Continuous Wave (steady-state) or Frequency Domain (modulated) forward model",
+        items=[
+            ('CW', "Continuous Wave", "Steady-state (DC) light source"),
+            ('FD', "Frequency Domain", "Modulated light source at a set frequency"),
+        ],
         default='CW',
     )
-    redbird_frequency:          bpy.props.FloatProperty(name="Frequency (MHz)",       default=70.0, min=0.0,  max=1000.0, step=10,  precision=1)
+    redbird_frequency:          bpy.props.FloatProperty(name="Frequency (MHz)",       default=70.0, min=0.0,  max=1000.0, step=10,  precision=1,
+                                    description="Modulation frequency, used in Frequency Domain mode")
     redbird_crop_margin:         bpy.props.FloatProperty(name="Crop Margin (mm)",       default=10.0, min=5.0,  max=50.0,   step=5,   precision=1,
                                     description="mm to extend beyond optode bounding box on all sides")
-    redbird_min_depth:           bpy.props.FloatProperty(name="Min Depth (mm)",        default=2.0,  min=0.5,  max=10.0,   step=0.5, precision=1)
+    redbird_min_depth:           bpy.props.FloatProperty(name="Min Depth (mm)",        default=2.0,  min=0.5,  max=10.0,   step=0.5, precision=1,
+                                    description="Minimum optode penetration depth into the mesh")
     redbird_max_iter:    bpy.props.IntProperty(  name="Max Iterations",   default=10,   min=1,   max=10000,
                              description="Maximum CG solver iterations for the FEM forward solve")
     redbird_lambda:      bpy.props.FloatProperty(name="Regularization \u03bb", default=1e-6, min=1e-12, max=1.0, precision=8,
@@ -110,21 +131,26 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
     # Schematic
     schematic_landmark_tier: bpy.props.EnumProperty(
         name="Landmarks",
+        description="Overlay a 10-20 system landmark layer on the 2D schematic",
         items=[
-            ("NONE", "None",  ""),
-            ("1020", "10-20", ""),
-            ("1010", "10-10", ""),
-            ("105",  "10-5",  ""),
+            ("NONE", "None",  "No landmark overlay"),
+            ("1020", "10-20", "Overlay the 10-20 landmark system"),
+            ("1010", "10-10", "Overlay the 10-10 landmark system"),
+            ("105",  "10-5",  "Overlay the 10-5 landmark system"),
         ],
         default="NONE",
         update=lambda self, ctx: bpy.ops.neurocaptain.refresh_2d_schematic(),
     )
     schematic_show_channels: bpy.props.BoolProperty(
-        name="Channels", default=True,
+        name="Channels",
+        description="Draw source-detector channel lines on the 2D schematic",
+        default=True,
         update=lambda self, ctx: bpy.ops.neurocaptain.refresh_2d_schematic(),
     )
     schematic_show_lm_labels: bpy.props.BoolProperty(
-        name="Landmark Labels", default=False,
+        name="Landmark Labels",
+        description="Show landmark name labels on the 2D schematic overlay",
+        default=False,
         update=lambda self, ctx: bpy.ops.neurocaptain.refresh_2d_schematic(),
     )
 
@@ -165,6 +191,395 @@ class NEUROCAPTAIN_OT_import_layered_mesh(bpy.types.Operator):
             return {'CANCELLED'}
 
 
+# ── Flexible (N-layer) mesh import ──────────────────────────────────────────
+
+_LAYER_ROLE_ITEMS = [
+    ('scalp',        "Scalp",        "This layer is the scalp/skin"),
+    ('skull',        "Skull",        "This layer is the skull"),
+    ('csf',          "CSF",          "This layer is cerebrospinal fluid"),
+    ('gray_matter',  "Gray Matter",  "This layer is gray matter"),
+    ('white_matter', "White Matter", "This layer is white matter"),
+    ('other',        "Other",        "Tissue type not listed above"),
+    ('custom',       "Custom...",    "Type your own role name below"),
+]
+_MAX_FLEXIBLE_LAYERS = 8
+
+
+class NEUROCAPTAIN_OT_import_layered_mesh_flexible(bpy.types.Operator):
+    """Import a layered head model with any number of tissue layers (fewer
+    than the standard 5, or more). Looks for layer names in the mesh file or
+    a sidecar JSON; prompts you to define them if none are found"""
+    bl_idname = "neurocaptain.import_layered_mesh_flexible"
+    bl_label  = "Import Layered Mesh (Any Layer Count)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepath:    bpy.props.StringProperty(subtype="FILE_PATH")
+    filter_glob: bpy.props.StringProperty(default="*.mat;*.jmsh;*.bmsh;*.json", options={'HIDDEN'})
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        if not self.filepath:
+            self.report({'ERROR'}, "No file selected")
+            return {'CANCELLED'}
+        if not lmm.ISO2MESH_AVAILABLE:
+            self.report({'ERROR'}, "Missing dependency: iso2mesh")
+            return {'CANCELLED'}
+
+        try:
+            source = lmm.load_layered_mesh_source(self.filepath)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to read mesh: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        if source['layer_definitions'] is not None:
+            try:
+                result = lmm.import_layered_head_model_flexible(
+                    self.filepath, reference_obj_name='headmesh',
+                    layer_definitions=source['layer_definitions'],
+                )
+                self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+                return {'FINISHED'} if result['success'] else {'CANCELLED'}
+            except Exception as e:
+                self.report({'ERROR'}, f"Import failed: {e}")
+                import traceback; traceback.print_exc()
+                return {'CANCELLED'}
+
+        # No layer names found anywhere in/around the file -> ask the user
+        num_layers = len(source['unique_labels'])
+        if num_layers > _MAX_FLEXIBLE_LAYERS:
+            self.report({'ERROR'}, f"{num_layers} layers detected, exceeds the {_MAX_FLEXIBLE_LAYERS} supported by the naming prompt")
+            return {'CANCELLED'}
+
+        bpy.ops.neurocaptain.define_layers(
+            'INVOKE_DEFAULT',
+            mesh_path=self.filepath,
+            reference_obj_name='headmesh',
+            label_ids=",".join(str(i) for i in source['unique_labels']),
+        )
+        return {'FINISHED'}
+
+
+class NEUROCAPTAIN_OT_define_layers(bpy.types.Operator):
+    """Assign a name and tissue role to each detected layer, then import"""
+    bl_idname = "neurocaptain.define_layers"
+    bl_label  = "Define Mesh Layers"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    mesh_path:          bpy.props.StringProperty(subtype="FILE_PATH", options={'HIDDEN'})
+    reference_obj_name: bpy.props.StringProperty(default="headmesh", options={'HIDDEN'})
+    label_ids:          bpy.props.StringProperty(options={'HIDDEN'})  # comma-separated tissue label ids
+
+    __annotations__ = dict(__annotations__)
+    for _i in range(_MAX_FLEXIBLE_LAYERS):
+        __annotations__[f'name_{_i}'] = bpy.props.StringProperty(
+            name="Name", description="Display name for this tissue layer", default="")
+        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(
+            name="Role", description="Tissue type this layer represents", items=_LAYER_ROLE_ITEMS, default='other')
+        __annotations__[f'custom_{_i}'] = bpy.props.StringProperty(
+            name="Custom Role", description="Role name to use when Role is set to Custom...", default="")
+    del _i
+
+    def _label_ids(self):
+        return [int(x) for x in self.label_ids.split(',') if x]
+
+    def invoke(self, context, event):
+        # Pre-fill names/roles from default guesses so the user only edits what's wrong
+        for i, label_id in enumerate(self._label_ids()):
+            setattr(self, f'name_{i}', f"Layer {label_id}")
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        ids = self._label_ids()
+        layout.label(text=f"No layer names found — detected {len(ids)} tissue label(s):", icon='INFO')
+        for i, label_id in enumerate(ids):
+            box = layout.box()
+            row = box.row(align=True)
+            row.label(text=f"Tissue {label_id}:")
+            row.prop(self, f'name_{i}', text="")
+            row2 = box.row(align=True)
+            row2.prop(self, f'role_{i}', text="Role")
+            if getattr(self, f'role_{i}') == 'custom':
+                row2.prop(self, f'custom_{i}', text="")
+
+    def execute(self, context):
+        role_labels = {identifier: label for identifier, label, _ in _LAYER_ROLE_ITEMS}
+        layer_definitions = {}
+        for i, label_id in enumerate(self._label_ids()):
+            role = getattr(self, f'role_{i}')
+            name = getattr(self, f'name_{i}').strip()
+            if role == 'custom':
+                custom = getattr(self, f'custom_{i}').strip()
+                role_key = custom.lower().replace(' ', '_') if custom else 'other'
+                if not name:
+                    name = custom or f"Layer {label_id}"
+            else:
+                role_key = role
+                if not name:
+                    name = role_labels[role] if role != 'other' else f"Layer {label_id}"
+            layer_definitions[label_id] = {'name': name, 'role': role_key}
+
+        try:
+            result = lmm.import_layered_head_model_flexible(
+                self.mesh_path, reference_obj_name=self.reference_obj_name,
+                layer_definitions=layer_definitions,
+            )
+            self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+            return {'FINISHED'} if result['success'] else {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
+# ── NIfTI (segmented volume) mesh import ────────────────────────────────────
+_NIFTI_ROLE_ITEMS = [
+    ('scalp',        "Scalp",             "This label is the scalp/skin"),
+    ('skull',        "Skull",             "This label is the skull"),
+    ('csf',          "CSF",               "This label is cerebrospinal fluid"),
+    ('gray_matter',  "Gray Matter",       "This label is gray matter"),
+    ('white_matter', "White Matter",      "This label is white matter"),
+    ('other',        "Other / Ignore",    "Not used for meshing (background, air, unrelated label, etc.)"),
+]
+_MAX_NIFTI_LABELS = 20
+# Translates match_nifti_filename_to_tissue()'s 'gm'/'wm' to this dialog's enum ids.
+_ROLE_ENUM_FROM_SEG_KEY = {'scalp': 'scalp', 'skull': 'skull', 'csf': 'csf', 'gm': 'gray_matter', 'wm': 'white_matter'}
+
+
+class NEUROCAPTAIN_OT_import_layered_mesh_nifti(bpy.types.Operator):
+    """Import a layered head model from a discrete tissue-segmented NIfTI
+    volume - not a raw scan or probability map. Select one file with
+    multiple tissue labels, or several files (one binary mask per tissue)"""
+    bl_idname = "neurocaptain.import_layered_mesh_nifti"
+    bl_label  = "Import Layered Mesh (NIfTI)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    directory: bpy.props.StringProperty(subtype='DIR_PATH', options={'HIDDEN', 'SKIP_SAVE'})
+    files: bpy.props.CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})
+    filter_glob: bpy.props.StringProperty(default="*.nii;*.nii.gz", options={'HIDDEN'})
+    downsample: bpy.props.IntProperty(
+        name="Downsample Factor",
+        description="Shrink the volume by this factor per axis before meshing. Higher = faster/less "
+                    "memory, less detail. 1 = full resolution",
+        default=1, min=1, max=16,
+    )
+    mask_smooth: bpy.props.FloatProperty(
+        name="Mask Smoothing",
+        description="Blurs each tissue mask before meshing to round off staircase edges. Usually leave "
+                    "at 0 - can erode thin tissue regions if raised",
+        default=0.0, min=0.0, max=5.0,
+    )
+    maxvol: bpy.props.FloatProperty(
+        name="Max Tetrahedron Volume",
+        description="Target max tetrahedral element size. Lower = denser/more detailed mesh, slower",
+        default=100.0, min=1.0, max=10000.0,
+    )
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Downsample factor to apply before meshing:", icon='INFO')
+        layout.prop(self, "downsample")
+        layout.label(text="(1 = full resolution; higher = faster/less memory, less surface detail)")
+        layout.separator()
+        layout.prop(self, "mask_smooth")
+        layout.label(text="(usually leave at 0 - can erode thin tissue regions if raised)")
+        layout.separator()
+        layout.prop(self, "maxvol")
+        layout.label(text="(lower = denser/more detailed mesh, more nodes/elements)")
+        layout.separator()
+        layout.label(text="Click OK, then choose your NIfTI file(s) in the browser that opens next.")
+
+    def execute(self, context):
+        if not self.files:
+            # Dialog OK'd but no files chosen yet - open the file browser next.
+            context.window_manager.fileselect_add(self)
+            return {'RUNNING_MODAL'}
+
+        filepaths = [str(Path(self.directory) / f.name) for f in self.files if f.name]
+        if not filepaths:
+            self.report({'ERROR'}, "No file selected")
+            return {'CANCELLED'}
+        if not lmm.ISO2MESH_AVAILABLE:
+            self.report({'ERROR'}, "Missing dependency: iso2mesh")
+            return {'CANCELLED'}
+
+        try:
+            result = lmm.import_layered_head_model_from_nifti(
+                filepaths, reference_obj_name='headmesh', downsample=self.downsample,
+                mask_smooth=self.mask_smooth, maxvol=self.maxvol)
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        if result.get('needs_roles'):
+            num_labels = len(result['unique_labels'])
+            if num_labels > _MAX_NIFTI_LABELS:
+                self.report({'ERROR'}, f"{num_labels} distinct values detected, exceeds the {_MAX_NIFTI_LABELS} supported by the tissue-role dialog - "
+                                        "this usually means the file isn't a discrete segmentation (e.g. it's a continuous "
+                                        "intensity/probability image rather than integer tissue labels)")
+                return {'CANCELLED'}
+            try:
+                bpy.ops.neurocaptain.define_nifti_roles(
+                    'INVOKE_DEFAULT',
+                    filepath=filepaths[0],
+                    reference_obj_name='headmesh',
+                    label_ids=",".join(str(i) for i in result['unique_labels']),
+                    downsample=self.downsample,
+                    mask_smooth=self.mask_smooth,
+                    maxvol=self.maxvol,
+                )
+            except RuntimeError as e:
+                self.report({'ERROR'}, str(e))
+                return {'CANCELLED'}
+            return {'FINISHED'}
+
+        if result.get('needs_file_roles'):
+            filenames = result['filenames']
+            if len(filenames) > _MAX_NIFTI_LABELS:
+                self.report({'ERROR'}, f"{len(filenames)} files selected, exceeds the {_MAX_NIFTI_LABELS} supported by the per-file role dialog")
+                return {'CANCELLED'}
+            try:
+                bpy.ops.neurocaptain.define_nifti_file_roles(
+                    'INVOKE_DEFAULT',
+                    filepaths_str="\n".join(filenames),
+                    reference_obj_name='headmesh',
+                    downsample=self.downsample,
+                    mask_smooth=self.mask_smooth,
+                    maxvol=self.maxvol,
+                )
+            except RuntimeError as e:
+                self.report({'ERROR'}, str(e))
+                return {'CANCELLED'}
+            return {'FINISHED'}
+
+        self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+        return {'FINISHED'} if result['success'] else {'CANCELLED'}
+
+
+class NEUROCAPTAIN_OT_define_nifti_file_roles(bpy.types.Operator):
+    """Assign a tissue role to each selected NIfTI file, then mesh and
+    import - each file must already be its own binary mask for one tissue"""
+    bl_idname = "neurocaptain.define_nifti_file_roles"
+    bl_label  = "Assign NIfTI File Roles"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepaths_str:      bpy.props.StringProperty(options={'HIDDEN'})  # newline-separated (paths can't contain newlines)
+    reference_obj_name: bpy.props.StringProperty(default="headmesh", options={'HIDDEN'})
+    downsample:         bpy.props.IntProperty(default=1, options={'HIDDEN'})
+    mask_smooth:        bpy.props.FloatProperty(default=0.0, options={'HIDDEN'})
+    maxvol:             bpy.props.FloatProperty(default=100.0, options={'HIDDEN'})
+
+    __annotations__ = dict(__annotations__)
+    for _i in range(_MAX_NIFTI_LABELS):
+        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(
+            name="Role", description="Tissue type this file represents", items=_NIFTI_ROLE_ITEMS, default='other')
+    del _i
+
+    def _filepaths(self):
+        return self.filepaths_str.split("\n")
+
+    def invoke(self, context, event):
+        paths = self._filepaths()
+        if len(paths) > _MAX_NIFTI_LABELS:
+            self.report({'ERROR'}, f"{len(paths)} files detected, exceeds the {_MAX_NIFTI_LABELS} supported by this dialog")
+            return {'CANCELLED'}
+        # Pre-fill from filename as a convenience guess only; not required.
+        for i, path in enumerate(paths):
+            guess = lmm.match_nifti_filename_to_tissue(Path(path).name)
+            setattr(self, f'role_{i}', _ROLE_ENUM_FROM_SEG_KEY.get(guess, 'other'))
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        paths = self._filepaths()
+        layout.label(text=f"Confirm what each of the {len(paths)} selected file(s) represents:", icon='INFO')
+        for i, path in enumerate(paths):
+            row = layout.row(align=True)
+            row.label(text=Path(path).name)
+            row.prop(self, f'role_{i}', text="")
+
+    def execute(self, context):
+        paths = self._filepaths()
+        file_roles = {path: getattr(self, f'role_{i}') for i, path in enumerate(paths)}
+        try:
+            result = lmm.import_layered_head_model_from_nifti(
+                paths, file_roles=file_roles, reference_obj_name=self.reference_obj_name,
+                downsample=self.downsample, mask_smooth=self.mask_smooth, maxvol=self.maxvol,
+            )
+            self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+            return {'FINISHED'} if result['success'] else {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
+class NEUROCAPTAIN_OT_define_nifti_roles(bpy.types.Operator):
+    """Assign a tissue role to each label found in a segmented NIfTI volume,
+    then mesh and import"""
+    bl_idname = "neurocaptain.define_nifti_roles"
+    bl_label  = "Assign NIfTI Tissue Labels"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepath:           bpy.props.StringProperty(subtype="FILE_PATH", options={'HIDDEN'})
+    reference_obj_name: bpy.props.StringProperty(default="headmesh", options={'HIDDEN'})
+    label_ids:          bpy.props.StringProperty(options={'HIDDEN'})  # comma-separated raw label values
+    downsample:         bpy.props.IntProperty(default=1, options={'HIDDEN'})  # carried over from the file-select step
+    mask_smooth:        bpy.props.FloatProperty(default=0.0, options={'HIDDEN'})  # carried over from the file-select step
+    maxvol:             bpy.props.FloatProperty(default=100.0, options={'HIDDEN'})  # carried over from the file-select step
+
+    __annotations__ = dict(__annotations__)
+    for _i in range(_MAX_NIFTI_LABELS):
+        __annotations__[f'role_{_i}'] = bpy.props.EnumProperty(
+            name="Role", description="Tissue type this label represents", items=_NIFTI_ROLE_ITEMS, default='other')
+    del _i
+
+    def _label_ids(self):
+        return [int(x) for x in self.label_ids.split(',') if x]
+
+    def invoke(self, context, event):
+        ids = self._label_ids()
+        if len(ids) > _MAX_NIFTI_LABELS:
+            self.report({'ERROR'}, f"{len(ids)} labels detected, exceeds the {_MAX_NIFTI_LABELS} supported by this dialog")
+            return {'CANCELLED'}
+        # Pre-fill with a best-guess order; user confirms/corrects below.
+        guess = lmm.guess_nifti_tissue_roles(ids)
+        for i, label_id in enumerate(ids):
+            setattr(self, f'role_{i}', guess[label_id])
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def draw(self, context):
+        layout = self.layout
+        ids = self._label_ids()
+        layout.label(text=f"No standard convention can be assumed — confirm what each of the {len(ids)} label(s) in this volume represents:", icon='INFO')
+        for i, label_id in enumerate(ids):
+            row = layout.row(align=True)
+            row.label(text=f"Label {label_id}:")
+            row.prop(self, f'role_{i}', text="")
+
+    def execute(self, context):
+        label_roles = {label_id: getattr(self, f'role_{i}') for i, label_id in enumerate(self._label_ids())}
+        try:
+            result = lmm.import_layered_head_model_from_nifti(
+                [self.filepath], label_roles=label_roles, reference_obj_name=self.reference_obj_name,
+                downsample=self.downsample, mask_smooth=self.mask_smooth, maxvol=self.maxvol,
+            )
+            self.report({'INFO'} if result['success'] else {'ERROR'}, result['message'])
+            return {'FINISHED'} if result['success'] else {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
 # ============================================================================
 # MMC OPERATORS
 # ============================================================================
@@ -183,6 +598,12 @@ class NEUROCAPTAIN_OT_setup_mmc(bpy.types.Operator):
         'g':   'Anisotropy (g)',
         'n':   'Ref Index (n)',
     }
+    _PARAM_DESCRIPTIONS = {
+        'mua': 'Absorption coefficient (1/mm)',
+        'mus': 'Reduced scattering coefficient (1/mm)',
+        'g':   'Scattering anisotropy factor (0-1)',
+        'n':   'Refractive index',
+    }
     _LAYER_DEFAULTS = {
         1: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
         2: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
@@ -194,7 +615,8 @@ class NEUROCAPTAIN_OT_setup_mmc(bpy.types.Operator):
     for _l, _lname in enumerate(_LAYER_NAMES, 1):
         for _p in ('mua', 'mus', 'g', 'n'):
             __annotations__[f'layer{_l}_{_p}'] = bpy.props.FloatProperty(
-                name=_PARAM_LABELS[_p], default=_LAYER_DEFAULTS[_l][_p],
+                name=_PARAM_LABELS[_p], description=_PARAM_DESCRIPTIONS[_p],
+                default=_LAYER_DEFAULTS[_l][_p],
                 min=0.0, max=100.0, precision=4,
             )
 
@@ -258,6 +680,21 @@ class NEUROCAPTAIN_OT_run_mmc(bpy.types.Operator):
     bl_label  = "Run MMC"
     bl_options = {'REGISTER', 'UNDO'}
 
+    def invoke(self, context, event):
+        # MMC has no timeout yet - if the OpenCL/GPU setting is wrong for
+        # this machine, this can freeze Blender until force-quit. Prompt to
+        # save first so a freeze doesn't cost unsaved work. Using
+        # invoke_props_dialog + draw() rather than invoke_confirm's
+        # message= kwarg, which doesn't exist on Blender 3.4's
+        # WindowManager.invoke_confirm (confirmed via real testing).
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="MMC may take a while, and can freeze Blender if the")
+        layout.label(text="GPU/OpenCL setting doesn't match this machine.")
+        layout.label(text="Save your work first!", icon='ERROR')
+
     def execute(self, context):
         if not lmm.is_mesh_loaded():
             self.report({'ERROR'}, "Import 5-layer mesh first.")
@@ -313,6 +750,18 @@ class NEUROCAPTAIN_OT_setup_redbird(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     # Optical properties per layer (5 layers × 4 params)
+    _PARAM_LABELS = {
+        'mua': 'Absorb (mua)',
+        'mus': 'Scatter (mus)',
+        'g':   'Anisotropy (g)',
+        'n':   'Ref Index (n)',
+    }
+    _PARAM_DESCRIPTIONS = {
+        'mua': 'Absorption coefficient (1/mm)',
+        'mus': 'Reduced scattering coefficient (1/mm)',
+        'g':   'Scattering anisotropy factor (0-1)',
+        'n':   'Refractive index',
+    }
     _LAYER_DEFAULTS = {
         1: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
         2: {'mua': 0.019, 'mus': 7.8,   'g': 0.89, 'n': 1.37},
@@ -324,7 +773,8 @@ class NEUROCAPTAIN_OT_setup_redbird(bpy.types.Operator):
     for _l in range(1, 6):
         for _p in ('mua', 'mus', 'g', 'n'):
             __annotations__[f'layer{_l}_{_p}'] = bpy.props.FloatProperty(
-                name=f'L{_l} {_p}', default=_LAYER_DEFAULTS[_l][_p],
+                name=_PARAM_LABELS[_p], description=_PARAM_DESCRIPTIONS[_p],
+                default=_LAYER_DEFAULTS[_l][_p],
                 min=0.0, max=100.0, precision=4,
             )
 
@@ -393,6 +843,19 @@ class NEUROCAPTAIN_OT_run_redbird(bpy.types.Operator):
     bl_idname = "neurocaptain.run_redbird"
     bl_label  = "Run Redbird"
     bl_options = {'REGISTER', 'UNDO'}
+
+    def invoke(self, context, event):
+        # Redbird can take a while on large meshes. Prompt to save first so
+        # a very long run doesn't cost unsaved work in the meantime. Using
+        # invoke_props_dialog + draw() rather than invoke_confirm's
+        # message= kwarg, which doesn't exist on Blender 3.4's
+        # WindowManager.invoke_confirm (confirmed via real testing).
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Redbird may take a while to run on large meshes.")
+        layout.label(text="Save your work first!", icon='ERROR')
 
     def execute(self, context):
         if not lmm.is_mesh_loaded():
@@ -512,6 +975,10 @@ class NEUROCAPTAIN_PT_capgen_subpanel(bpy.types.Panel):
         row = layout.row()
         row.operator(select_model.bl_idname, text="Headmesh",   icon="USER").action = "ADD_HEADMESH"
         row.operator(select_model.bl_idname, text="10-20 Mesh", icon="OUTLINER_DATA_VOLUME").action = "ADD_BRAIN1020MESH"
+        layout.operator(NEUROCAPTAIN_OT_import_headmesh_from_nifti.bl_idname,
+                         text="Headmesh from NIfTI Mask", icon="FILE_VOLUME")
+        layout.operator(NEUROCAPTAIN_OT_import_layered_mesh_nifti.bl_idname,
+                         text="Layered Mesh from NIfTI", icon="FILE_VOLUME")
 
         layout.separator()
         layout.label(text="Generate 10-20 Landmarks", icon="SHADING_SOLID")
@@ -667,7 +1134,7 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
 
         # ── Transform / Export ───────────────────────────────────────────
         layout.separator()
-        layout.operator("neurocaptain.rigid_rotate_optodes",  text="Rigid Rotate Selected", icon="CON_ROTLIKE")
+        layout.operator("neurocaptain.rigid_rotate_optodes",  text="Rigid Rotate All", icon="CON_ROTLIKE")
         layout.operator("neurocaptain.export_optode_json",    text="Export Optode Config",     icon="EXPORT")
 
         # ── 2D Schematic ─────────────────────────────────────────────────
@@ -736,6 +1203,10 @@ class NEUROCAPTAIN_PT_lightsim_subpanel(bpy.types.Panel):
             row.operator("neurocaptain.import_layered_mesh", text="Load Different", icon="FILE_REFRESH")
         else:
             layout.operator("neurocaptain.import_layered_mesh", text="From File (.mat)", icon="IMPORT")
+        layout.operator("neurocaptain.import_layered_mesh_flexible",
+                         text="From File (any layer count)", icon="IMPORT")
+        layout.operator("neurocaptain.import_layered_mesh_nifti",
+                         text="From File (.nii segmented volume)", icon="IMPORT")
 
         layout.separator()
         njloader.draw_neurojson_browser(layout, context)
@@ -811,7 +1282,7 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
             if len(missing) > 3:
                 box.label(text=f"• ... and {len(missing) - 3} more")
             from .pkg import (InstallJData, InstallNumPy, InstallSciPy,
-                               InstallIso2Mesh, InstallPMMC,
+                               InstallIso2Mesh, InstallPMCX, InstallPMMC, InstallRedbird,
                                InstallAllDependencies, CheckDependencies)
             row = box.row()
             row.operator(InstallAllDependencies.bl_idname, text="Install All", icon="IMPORT")
@@ -822,7 +1293,10 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
             row.operator(InstallSciPy.bl_idname,    text="SciPy",    icon="FILE_TICK")
             row = box.row()
             row.operator(InstallIso2Mesh.bl_idname, text="iso2mesh", icon="FILE_TICK")
+            row.operator(InstallPMCX.bl_idname,     text="pmcx",     icon="FILE_TICK")
             row.operator(InstallPMMC.bl_idname,     text="pmmc",     icon="FILE_TICK")
+            row = box.row()
+            row.operator(InstallRedbird.bl_idname,  text="redbirdpy", icon="FILE_TICK")
         else:
             from .pkg import CheckDependencies
             box.operator(CheckDependencies.bl_idname,
@@ -842,6 +1316,12 @@ class NEUROCAPTAIN_PT_dependencies_subpanel(bpy.types.Panel):
 CLASSES = [
     NeuroCaptainSettings,
     NEUROCAPTAIN_OT_import_layered_mesh,
+    NEUROCAPTAIN_OT_import_layered_mesh_flexible,
+    NEUROCAPTAIN_OT_define_layers,
+    NEUROCAPTAIN_OT_import_layered_mesh_nifti,
+    NEUROCAPTAIN_OT_define_nifti_roles,
+    NEUROCAPTAIN_OT_define_nifti_file_roles,
+    NEUROCAPTAIN_OT_import_headmesh_from_nifti,
     NEUROCAPTAIN_OT_setup_mmc,
     NEUROCAPTAIN_OT_run_mmc,
     NEUROCAPTAIN_OT_setup_redbird,
@@ -866,15 +1346,11 @@ def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.neurocaptain_settings = bpy.props.PointerProperty(type=NeuroCaptainSettings)
-    bpy.types.Scene.neurocaptain_selected_action = bpy.props.StringProperty(
-        name="Selected Action", default=""
-    )
 
 
 def unregister():
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.neurocaptain_settings
-    del bpy.types.Scene.neurocaptain_selected_action
     schematic_2d.unregister()
     njloader.unregister()

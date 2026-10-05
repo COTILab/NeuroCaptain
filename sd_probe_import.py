@@ -416,7 +416,6 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         # Build BVH once
         bvh = BVHTree.FromObject(head_mesh, bpy.context.evaluated_depsgraph_get())
 
-        # --- Affine seed (gen_positionprobe_dat.m / gen_xform_from_pts.m) ---
         # Least-squares affine from flat 2D anchor positions -> 3D atlas positions,
         # applied to all optodes. Direct translation of AtlasViewer's initialization.
         positions = self._seed_positions_affine(
@@ -468,7 +467,7 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
 
         for it in range(N_ITER):
 
-            # Spring forces — Jacobian style (from positionprobe.m)
+            # Spring forces 
             forces = np.zeros((n_points, 3))
             for (i1, i2, rest, ks) in spring_data:
                 rsepvec = positions[i1] - positions[i2]
@@ -482,7 +481,7 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                 if i2 not in anchor_set:
                     forces[i2] -= J
 
-            # Global normalization — from positionprobe.m: / max(abs(delta_r))
+            # Global normalization 
             delta = -forces
             for aidx in anchor_set:
                 delta[aidx] = 0.0

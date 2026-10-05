@@ -3,7 +3,7 @@ from bpy.types import Operator
 
 
 def _get_interface_items(interface):
-    """Compat: items_tree (3.5-4.1) vs items (4.2+)."""
+    """Compat: items_tree (4.0-4.1) vs items (4.2+)."""
     if hasattr(interface, 'items_tree'):
         return interface.items_tree
     return interface.items
@@ -113,7 +113,7 @@ class dual_mesh_NC(Operator):
         if not out_node:
             out_node = node_tree.nodes.new("NodeGroupOutput")
 
-        if (major, minor) >= (3, 5):
+        if (major, minor) >= (4, 0):
             interface = node_tree.interface
             if not any(s.name == "Geometry" and s.in_out == "INPUT" for s in _get_interface_items(interface)):
                 interface.new_socket(

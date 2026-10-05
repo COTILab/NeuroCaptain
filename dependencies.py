@@ -20,6 +20,7 @@ DEPENDENCIES = {
     "pmcx": False,
     "pmmc": False,
     "scipy": False,
+    "redbirdpy": False,
 }
 
 # Error messages for missing dependencies
@@ -30,6 +31,7 @@ MISSING_MESSAGES = {
     "pmcx": "pmcx package is required for Monte Carlo eXtreme simulations",
     "pmmc": "pmmc package is required for Mesh-based Monte Carlo simulations",
     "scipy": "scipy package is required for spatial operations",
+    "redbirdpy": "redbirdpy package is required for FEM diffuse optical forward simulations",
 }
 
 
@@ -58,7 +60,7 @@ def get_missing_dependencies():
 def require_dependency(module_name, operation_name="this operation"):
     """Check if a dependency is available, show error if not."""
     if not DEPENDENCIES.get(module_name, False):
-        message = f"{MISSING_MESSAGES.get(module_name, f'{module_name} is required')} for {operation_name}. Please install it using the buttons in the BlenderPhotonics panel."
+        message = f"{MISSING_MESSAGES.get(module_name, f'{module_name} is required')} for {operation_name}. Please install it using the buttons in the NeuroCaptain Dependencies panel."
         show_error_message(message)
         return False
     return True

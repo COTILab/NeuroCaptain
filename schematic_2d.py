@@ -2,11 +2,6 @@
 schematic_2d.py  —  NeuroCaptain
 2-D optode schematic using Blender's image pixel buffer.
 No GPU module required.
-
-This is v2 (the working dark-navy version) with three additions:
-  1. collect_connections() reads mesh edges + optode_names_ordered  (was broken)
-  2. Bitmap font for landmark labels
-  3. Proper nose triangle + oval ears
 """
 
 import math
@@ -550,6 +545,12 @@ class NEUROCAPTAIN_OT_open_schematic(bpy.types.Operator):
 
     filepath:    bpy.props.StringProperty(subtype="FILE_PATH")
     filter_glob: bpy.props.StringProperty(default="*.json", options={'HIDDEN'})
+
+    @classmethod
+    def description(cls, context, properties):
+        if collect_optodes():
+            return "Generate a 2D schematic from the optodes already in the scene"
+        return "Import a probe JSON file and generate a 2D schematic from it"
 
     def invoke(self, context, event):
         if collect_optodes():

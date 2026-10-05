@@ -236,7 +236,23 @@ def run_redbird_simulation():
             'success': False,
             'message': 'No head surface found'
         }
-    
+
+    # run_redbird_simulation()/visualize_on_cortex() hide this object
+    # (hide_viewport=True) at the end of a previous successful run, purely
+    # so the cortex heatmap displays cleanly - but a hidden object has no
+    # evaluated depsgraph data, which get_inward_normal_at_point()'s
+    # closest_point_on_mesh() call below needs. Resetting hide_viewport alone
+    # isn't enough to fix a second run: closest_point_on_mesh() reads the
+    # object via DEG_get_evaluated_object(), and nothing forces the
+    # depsgraph to actually re-evaluate the now-visible object before that
+    # call runs (unlike interactive use, where a viewport redraw does this
+    # automatically) - so it can still report "no evaluated mesh data" even
+    # with hide_viewport already False. view_layer.update() forces that
+    # re-evaluation immediately.
+    if headmesh.hide_viewport:
+        headmesh.hide_viewport = False
+    bpy.context.view_layer.update()
+
     bl_verts = get_blender_vertices(headmesh)
 
     # Head_Surface_5L is created with ALL volumetric nodes as vertices,
@@ -427,6 +443,22 @@ def run_redbird_simulation():
     print(f"    evol: min={cfg['evol'].min():.6f} max={cfg['evol'].max():.6f} neg={int((cfg['evol']<0).sum())}")
     if 'face' in cfg:
         print(f"    face: shape={cfg['face'].shape} dtype={cfg['face'].dtype} range=[{cfg['face'].min()},{cfg['face'].max()}]")
+
+    # Diagnostic: verify source/detector points actually land inside a
+    # cropped-mesh tetrahedron. redbirdpy's femrhs() silently zeroes out an
+    # optode's RHS column (rather than raising) if its inward-displaced
+    # position (srcpos/detpos + srcdir/detdir * 1/mu_tr) falls outside every
+    # element of cfg['elem'] - if that happens for all sources at once, the
+    # forward solve returns exactly phi=0.0 everywhere with no other error.
+    try:
+        _, loc_diag, _, optode_diag = forward.femrhs(cfg, sd)
+        n_missed = int(np.isnan(loc_diag).sum())
+        print(f"    femrhs: {len(loc_diag) - n_missed}/{len(loc_diag)} optodes landed inside a mesh element ({n_missed} missed)")
+        if n_missed > 0:
+            missed_idx = np.where(np.isnan(loc_diag))[0]
+            print(f"    missed optode positions: {optode_diag[missed_idx].tolist()}")
+    except Exception as e:
+        print(f"    femrhs diagnostic failed: {e}")
 
     # Forward solve — phi shape: (nn_crop, ns)
     print("\n1. Forward simulation...")

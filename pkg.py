@@ -70,7 +70,7 @@ def _make_installer(bl_idname, bl_label, bl_description, packages, prereqs=None)
                         all_pkgs.append(prereq_pkg)
             all_pkgs.extend(packages)
             show_error_message(
-                f"{' and '.join(all_pkgs)} installed successfully! ",
+                f"{' and '.join(all_pkgs)} installed successfully!",
                 "Installation Complete",
             )
 
@@ -137,7 +137,7 @@ InstallIso2Mesh = _make_installer(
     "blenderphotonics.install_iso2mesh",
     "Install iso2mesh",
     "Install iso2mesh package for mesh generation operations",
-    ["pyiso2mesh"],
+    ["iso2mesh"],
     prereqs=[(_always, "scipy")],
 )
 
@@ -156,6 +156,13 @@ InstallPMMC = _make_installer(
     prereqs=[(_is_windows, "sparse_numba")],
 )
 
+InstallRedbird = _make_installer(
+    "blenderphotonics.install_redbirdpy",
+    "Install redbirdpy",
+    "Install redbirdpy package for FEM diffuse optical forward simulations",
+    ["redbirdpy"],
+)
+
 
 # ---------------------------------------------------------------------------
 # InstallAllDependencies -- kept as an explicit class (partial-failure report)
@@ -164,7 +171,7 @@ InstallPMMC = _make_installer(
 class InstallAllDependencies(bpy.types.Operator):
     bl_idname = "blenderphotonics.install_all_deps"
     bl_label = "Install All Dependencies"
-    bl_description = "Install all required Python packages for BlenderPhotonics"
+    bl_description = "Install all required Python packages for NeuroCaptain"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -173,13 +180,14 @@ class InstallAllDependencies(bpy.types.Operator):
 
             import platform
 
-            packages = ["jdata", "numpy", "scipy", "pyiso2mesh", "pmcx"]
+            packages = ["jdata", "numpy", "scipy", "iso2mesh", "pmcx"]
 
             # Add Windows-specific dependency for pmmc
             if platform.system() == "Windows":
                 packages.append("sparse_numba")
 
             packages.append("pmmc")
+            packages.append("redbirdpy")
 
             failed_packages = []
 
@@ -198,7 +206,7 @@ class InstallAllDependencies(bpy.types.Operator):
                 )
             else:
                 show_error_message(
-                    "All dependencies installed successfully! ",
+                    "All dependencies installed successfully!",
                     "Installation Complete",
                 )
 

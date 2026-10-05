@@ -113,9 +113,9 @@ def add_to_collection(obj, collection):
 
 ## OPERATORS ##
 class NEUROCAPTAIN_OT_create_optode_connections(bpy.types.Operator):
-    """create edges connecting nearby optodes with soft body springs"""
+    """Create edges connecting nearby optodes with soft body springs"""
     bl_idname = "neurocaptain.create_optode_connections"
-    bl_label = "Create Optode Connections"
+    bl_label = "Connect Optodes by Distance"
     bl_options = {'REGISTER', 'UNDO'}
     
     distance_threshold: bpy.props.FloatProperty(
@@ -236,9 +236,9 @@ class NEUROCAPTAIN_OT_create_optode_connections(bpy.types.Operator):
 
 
 class NEUROCAPTAIN_OT_create_optode_connections_delaunay(bpy.types.Operator):
-    """create edges connecting optodes using Delaunay triangulation"""
+    """Create edges connecting optodes using Delaunay triangulation"""
     bl_idname = "neurocaptain.create_optode_connections_delaunay"
-    bl_label = "Create Optode Connections (Delaunay)"
+    bl_label = "Connect Optodes by Delaunay Triangulation"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
@@ -366,7 +366,7 @@ class NEUROCAPTAIN_OT_create_optode_connections_delaunay(bpy.types.Operator):
 class NEUROCAPTAIN_OT_modify_spring_properties(bpy.types.Operator):
     """Modify spring properties to make flexible"""
     bl_idname = "neurocaptain.modify_spring_properties"
-    bl_label = "Set Flexible Spring Properties"
+    bl_label = "Make Springs Flexible"
     bl_options = {'REGISTER', 'UNDO'}
     
     spring_pull: bpy.props.FloatProperty(
@@ -834,9 +834,9 @@ class NEUROCAPTAIN_OT_update_optode_connections(bpy.types.Operator):
 
 
 class NEUROCAPTAIN_OT_toggle_connection_visibility(bpy.types.Operator):
-    """toggle visibility of optode connections"""
+    """Toggle visibility of optode connections"""
     bl_idname = "neurocaptain.toggle_connection_visibility"
-    bl_label = "Toggle Connections"
+    bl_label = "Toggle Connection Visibility"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
@@ -865,7 +865,11 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
     bl_options = {'REGISTER'}
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
-    filename: bpy.props.StringProperty(default="probe_config.json")
+    filename: bpy.props.StringProperty(
+        name="File Name",
+        description="Name for the exported JSON file",
+        default="probe_config.json",
+    )
 
     def invoke(self, context, event):
         self.filepath = self.filename
@@ -1689,7 +1693,8 @@ class NEUROCAPTAIN_OT_undefine_anchor_optode(bpy.types.Operator):
 
 
 class NEUROCAPTAIN_OT_rigid_rotate_optodes(bpy.types.Operator):
-    """Rigidly rotate all optodes while maintaining surface constraints"""
+    """Rigidly rotate all optodes while maintaining surface constraints -
+    move mouse to rotate, left-click to confirm, ESC/right-click to cancel"""
     bl_idname = "neurocaptain.rigid_rotate_optodes"
     bl_label = "Rigid Rotate Optodes"
     bl_options = {'REGISTER', 'UNDO', 'GRAB_CURSOR', 'BLOCKING'}

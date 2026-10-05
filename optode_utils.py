@@ -368,7 +368,7 @@ class NEUROCAPTAIN_OT_add_detector(_OptodeMixin, bpy.types.Operator):
 class NEUROCAPTAIN_OT_move_optode(_OptodeMixin, bpy.types.Operator):
     """Reposition selected Source/Detector optodes — move mouse to new position, left-click to confirm, ESC to cancel"""
     bl_idname = "neurocaptain.move_optode"
-    bl_label = "Move Selected Optode"
+    bl_label = "Move Selected"
     bl_options = {'REGISTER', 'UNDO'}
 
     _optodes = []
@@ -464,7 +464,7 @@ class NEUROCAPTAIN_OT_move_optode(_OptodeMixin, bpy.types.Operator):
 class NEUROCAPTAIN_OT_ensure_optode_constraints(bpy.types.Operator):
     """Ensure all optodes have proper shrinkwrap constraints"""
     bl_idname = "neurocaptain.ensure_optode_constraints"
-    bl_label = "Ensure Optode Constraints"
+    bl_label = "Constrain to Head"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):

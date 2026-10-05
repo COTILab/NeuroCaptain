@@ -92,14 +92,14 @@ if bpy.app.version < (4, 0, 0):
     addon_utils.enable("io_mesh_stl")
 
 enum_action = [
-    ("ADD_HEADMESH", "add headmesh", "Access a folder called: HeadModels"),
-    ("ADD_BRAIN1020MESH", "add brain1020mesh", "Access a folder called: BrainLandmarks"),
+    ("ADD_HEADMESH", "add headmesh", "Import a head surface mesh from the HeadModels folder"),
+    ("ADD_BRAIN1020MESH", "add brain1020mesh", "Import a ready-made 10-20/10-10/10-5 landmark mesh from the ScalpLandmarks folder"),
 ]
 
 
 class select_model(Operator, ImportHelper):
     bl_label = "Select a head model"
-    bl_description = "Access folders with head models and brain-landmark meshes"
+    bl_description = "Import head surface meshes or scalp landmark meshes"
     bl_idname = "braincapgen.select_model"
 
     action: EnumProperty(
@@ -240,10 +240,9 @@ class select_model(Operator, ImportHelper):
 
     def invoke(self, context, event):
         addon_dir = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(addon_dir, "Models")
-        obs = []
-        self.filepath = path
-        wm = context.window_manager.fileselect_add(self)
+        folder = "HeadModels" if self.action == "ADD_HEADMESH" else "ScalpLandmarks"
+        self.filepath = os.path.join(addon_dir, folder) + os.sep
+        context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
     @staticmethod
@@ -253,74 +252,20 @@ class select_model(Operator, ImportHelper):
         head = bpy.data.objects["importedmodel"]
         bpy.ops.object.select_all(action="DESELECT")
         head.select_set(True)
-        bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="MEDIAN")
-        bpy.ops.view3d.snap_selected_to_cursor(use_offset=False)
+        recenter_on_vertex_mean(head)
+        head.location = (0.0, 0.0, 0.0)
 
         head.name = "headmesh"
         head.select_set(True)
 
-        if bpy.app.version >= (4, 0, 0):
-            bpy.ops.object.duplicate_move(
-                OBJECT_OT_duplicate={"linked": False, "mode": "TRANSLATION"},
-                TRANSFORM_OT_translate={
-                    "value": (0.212906, 0.0140968, 0.0237914),
-                    "orient_type": "GLOBAL",
-                    "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                    "orient_matrix_type": "GLOBAL",
-                    "constraint_axis": (False, False, False),
-                    "mirror": False,
-                    "use_proportional_edit": False,
-                    "proportional_edit_falloff": "SMOOTH",
-                    "proportional_size": 1,
-                    "use_proportional_connected": False,
-                    "use_proportional_projected": False,
-                    "snap": False,
-                    "cursor_transform": False,
-                    "texture_space": False,
-                    "remove_on_cancel": False,
-                    "view2d_edge_pan": False,
-                    "release_confirm": False,
-                    "use_accurate": False,
-                    "use_automerge_and_split": False,
-                },
-            )
-        else:
-            bpy.ops.object.duplicate_move(
-                OBJECT_OT_duplicate={"linked": False, "mode": "TRANSLATION"},
-                TRANSFORM_OT_translate={
-                    "value": (0.212906, 0.0140968, 0.0237914),
-                    # "orient_axis_ortho": "X",
-                    "orient_type": "GLOBAL",
-                    "orient_matrix": ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                    "orient_matrix_type": "GLOBAL",
-                    "constraint_axis": (False, False, False),
-                    "mirror": False,
-                    "use_proportional_edit": False,
-                    "proportional_edit_falloff": "SMOOTH",
-                    "proportional_size": 1,
-                    "use_proportional_connected": False,
-                    "use_proportional_projected": False,
-                    "snap": False,
-                    "snap_elements": {"INCREMENT"},
-                    "use_snap_project": False,
-                    "snap_target": "CLOSEST",
-                    "use_snap_self": True,
-                    "use_snap_edit": True,
-                    "use_snap_nonedit": True,
-                    "use_snap_selectable": False,
-                    "snap_point": (0, 0, 0),
-                    "snap_align": False,
-                    "snap_normal": (0, 0, 0),
-                    "gpencil_strokes": False,
-                    "cursor_transform": False,
-                    "texture_space": False,
-                    "remove_on_cancel": False,
-                    "view2d_edge_pan": False,
-                    "release_confirm": False,
-                    "use_accurate": False,
-                    "use_automerge_and_split": False,
-                },
-            )
+        # Duplicate + offset without bpy.ops.object.duplicate_move()
+        dup = head.copy()
+        dup.data = head.data.copy()
+        for collection in head.users_collection:
+            collection.objects.link(dup)
+        offset = (0.212906, 0.0140968, 0.0237914)
+        dup.location = tuple(loc + off for loc, off in zip(dup.location, offset))
+
         ob = bpy.context.scene.objects["headmesh.001"]
         bpy.ops.object.select_all(action="DESELECT")
         bpy.context.view_layer.objects.active = ob  # Make the cube the active object
@@ -341,6 +286,16 @@ class select_model(Operator, ImportHelper):
         bpy.ops.object.select_all(action="DESELECT")
         brain.select_set(True)
         brain.name = "LandmarkMesh"
+
+        # AddMeshFromNodeFace() placed this at the 3D cursor's location.
+        # headmesh always snaps to world (0,0,0) regardless of the cursor
+        # LandmarkMesh needs the same fixed target
+        brain.location = (0.0, 0.0, 0.0)
+
+        # LandmarkMesh's faces exist  so optode_connect.py's barycentric
+        # registration (landmark_mesh.data.polygons + BVHTree.FromObject) has
+        # a real surface to interpolate across
+        brain.display_type = 'WIRE' #visualize wire keeps data and rendering 
 
         num_verts = len(brain.data.vertices)
 
@@ -377,3 +332,84 @@ class select_model(Operator, ImportHelper):
                 "Landmark Label Warning", "ERROR")
 
         return {"FINISHED"}
+
+
+class NEUROCAPTAIN_OT_import_headmesh_from_nifti(Operator, ImportHelper):
+    """Import a head surface from a single-region NIfTI mask (e.g. head-vs-
+    background) by isosurfacing it - not a raw scan or multi-tissue
+    segmentation. For a full scalp/skull/csf/gray/white matter model, use
+    the layered NIfTI importer instead"""
+    bl_idname = "neurocaptain.import_headmesh_from_nifti"
+    bl_label = "Import Headmesh from NIfTI Mask"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filename_ext = ".nii"
+    filter_glob: StringProperty(default="*.nii;*.nii.gz", options={"HIDDEN"})
+
+    threshold: bpy.props.FloatProperty(
+        name="Threshold",
+        description="Voxels with a value above this are treated as part of the surface's region "
+                    "(0.5 is right for an already-binary 0/1 mask)",
+        default=0.5, min=0.0,
+    )
+    downsample: bpy.props.IntProperty(
+        name="Downsample Factor",
+        description="Reduce the volume's resolution by this factor before extracting the surface. "
+                    "1 = full resolution",
+        default=4, min=1, max=16,
+    )
+    decimate_ratio: bpy.props.FloatProperty(
+        name="Decimate Ratio",
+        description="Fraction of faces to keep after decimating. 1.0 skips this step",
+        default=0.5, min=0.01, max=1.0,
+    )
+
+    def execute(self, context):
+        from . import layered_mesh_manager as lmm
+
+        if not lmm.ISO2MESH_AVAILABLE:
+            self.report({'ERROR'}, "Missing dependency: iso2mesh")
+            return {'CANCELLED'}
+
+        try:
+            volume = lmm._read_nifti_volume(self.filepath)
+            if self.downsample > 1:
+                volume = volume[::self.downsample, ::self.downsample, ::self.downsample]
+            mask = (volume > self.threshold).astype(np.uint8)
+            if not mask.any():
+                self.report({'ERROR'}, f"No voxels above threshold {self.threshold} in this file - "
+                                        "check that this is the right file, or try a lower threshold")
+                return {'CANCELLED'}
+            node, elem = lmm.i2m.binsurface(mask)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to extract surface: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        faces = (elem - 1).astype(np.int32).tolist()  # binsurface is 1-indexed; Blender needs 0-indexed
+
+        # Clear any previous run's objects so this one cleanly replaces them.
+        for stale_name in ("importedmodel", "headmesh", "headmesh.001"):
+            stale = bpy.data.objects.get(stale_name)
+            if stale is not None:
+                mesh = stale.data if stale.type == 'MESH' else None
+                bpy.data.objects.remove(stale, do_unlink=True)
+                if mesh is not None and mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+
+        try:
+            AddMeshFromNodeFace(node.tolist(), faces, "importedmodel")
+            select_model.add_headmesh(context)
+            if self.decimate_ratio < 1.0:
+                bpy.ops.braincapgen.decimate_mesh(number=self.decimate_ratio)
+        except Exception as e:
+            self.report({'ERROR'}, f"Surface extracted but failed to build headmesh object: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        head = bpy.data.objects["headmesh"]
+        self.report({'INFO'}, f"Imported head surface from {os.path.basename(self.filepath)} "
+                               f"({len(head.data.vertices)} verts, {len(head.data.polygons)} faces "
+                               f"after downsample x{self.downsample}"
+                               + (f" + decimate to {self.decimate_ratio:.0%}" if self.decimate_ratio < 1.0 else "") + ")")
+        return {'FINISHED'}

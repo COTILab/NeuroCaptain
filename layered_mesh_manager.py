@@ -1020,13 +1020,10 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
         return {'success': False, 'message': "No layer surfaces could be extracted", 'info': None}
 
     # Snap the whole assembly onto headmesh's volume centroid (not headmesh's
-    # own pivot, which is vertex-mean-centered to match the landmark files -
-    # see recenter_on_vertex_mean) by translating every layer with the same
-    # rigid offset (anchored on the scalp layer). Volume-centroid-to-volume-
-    # centroid matching is what actually lines up two independently-meshed
-    # files of the same physical head (verified: ~1mm apart), unlike vertex
-    # mean, which drifts with how densely each file happens to sample the
-    # surface. Each layer's recenter_on_volume_centroid() call above already
+    # own pivot, which is vertex-mean-centered to match the landmark files 
+    # Volume-centroid-to-volume- is what lines up two independently-meshed
+    # files of the same physical head (verified: ~1mm apart),
+    # Each layer's recenter_on_volume_centroid() call above already
     # recentered its own pivot independently, so without this they'd each
     # have been left at their own separate volume-centroid location instead
     # of lining up with each other and with headmesh.

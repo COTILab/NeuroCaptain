@@ -258,16 +258,7 @@ class select_model(Operator, ImportHelper):
         head.name = "headmesh"
         head.select_set(True)
 
-        # Duplicate + offset without bpy.ops.object.duplicate_move(): its
-        # TRANSFORM_OT_translate stage activates a modal gizmo-drawing
-        # callback (ED_region_draw_cb_activate) that requires a real
-        # GPU-initialized viewport region, which crashes with a native
-        # EXCEPTION_ACCESS_VIOLATION/SIGSEGV under `blender --background`
-        # (confirmed on both 3.4 and 4.2 - not a Python exception, so
-        # temp_override can't help). Doing the duplicate and translate
-        # directly via bpy.data has the same effect and has no viewport
-        # dependency at all, so it works in the interactive UI, headless
-        # scripting, and CI alike.
+        # Duplicate + offset without bpy.ops.object.duplicate_move()
         dup = head.copy()
         dup.data = head.data.copy()
         for collection in head.users_collection:
@@ -298,21 +289,13 @@ class select_model(Operator, ImportHelper):
 
         # AddMeshFromNodeFace() placed this at the 3D cursor's location.
         # headmesh always snaps to world (0,0,0) regardless of the cursor
-        # (see add_headmesh) - LandmarkMesh needs the same fixed target, or
-        # it silently drifts away from headmesh by however far the cursor
-        # happens to be from the origin at import time.
+        # LandmarkMesh needs the same fixed target
         brain.location = (0.0, 0.0, 0.0)
 
-        # LandmarkMesh's faces exist only so optode_connect.py's barycentric
+        # LandmarkMesh's faces exist  so optode_connect.py's barycentric
         # registration (landmark_mesh.data.polygons + BVHTree.FromObject) has
-        # a real surface to interpolate across - they're not meant to be
-        # looked at. Since the landmark points don't sit exactly on
-        # headmesh's surface (a few mm off in normal operation), rendering
-        # those faces solid z-fights against headmesh in the viewport.
-        # display_type='WIRE' (same pattern optode_connect.py already uses
-        # for connection objects) keeps the mesh data fully intact for the
-        # BVH/barycentric lookups while never solid-rendering it.
-        brain.display_type = 'WIRE'
+        # a real surface to interpolate across
+        brain.display_type = 'WIRE' #visualize wire keeps data and rendering 
 
         num_verts = len(brain.data.vertices)
 

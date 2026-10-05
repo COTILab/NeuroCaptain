@@ -258,7 +258,7 @@ def import_five_layer_mesh(filepath, context):
         obj['tissue_labels'] = tissue_labels.tolist()
         obj['mesh_filepath'] = filepath
         
-        # Orient mesh — always zero rotation.
+        # Orient mesh — always zero rotation
         # MAT/iso2mesh meshes are in RAS coordinates (same Z-up as Blender),
         # so no rotation is required. Scale is matched from headmesh if present.
         reference_obj = bpy.data.objects.get('headmesh')
@@ -829,8 +829,7 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
 
     # Head_Surface_5L is created with ALL volumetric nodes as vertices,
     # so Blender's ORIGIN_CENTER_OF_MASS sets the origin at nodes.mean()
-    # (the center of ALL volume nodes).  The translation must match that
-    # origin so Blender→mesh coordinate conversion is exact.
+    #  The translation must match that origin 
     translation = nodes.mean(axis=0) - bl_verts.mean(axis=0)
     print(f"  Translation (volume center): [{translation[0]:.1f}, {translation[1]:.1f}, {translation[2]:.1f}]")
 
@@ -995,8 +994,7 @@ def visualize_on_cortex(results, data, smooth_iterations=5,
     # ── Distance-weighted interpolation onto cortex surface ───────────────────
     # For each cortex vertex, find the k nearest SENSITIVE mesh nodes within
     # FILL_RADIUS and compute an inverse-distance-weighted average log value.
-    # This produces a smooth continuous heatmap — no speckle from zero-value
-    # nearest-node lookups, no artificial background inflation.
+    # This produces a smooth continuous heatmap 
     k_near = min(8, valid_mask.sum())
     valid_tree = cKDTree(valid_pos)
     dists, near_idx = valid_tree.query(mat_verts, k=k_near, workers=-1)

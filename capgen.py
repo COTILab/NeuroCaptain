@@ -107,12 +107,7 @@ class cap_generation(Operator):
             voxelsize = self.voxel
             result = self.boolean_cut(context)
 
-        # reference_point()'s success path returns a plain vselect list
-        # (not an operator-result dict) and place_cutouts()/boolean_cut()
-        # return nothing on their success path (falling through to None) -
-        # only their explicit {"CANCELLED"} error path matters here. This
-        # used to be ignored entirely (execute() always returned FINISHED
-        # regardless), which let real failures - e.g. a boolean modifier
+        # a boolean modifier
         # silently failing to apply - pass through unreported while later
         # steps (wireframe/remesh) ran on the wrong, uncut mesh anyway.
         if result == {"CANCELLED"}:
@@ -298,9 +293,7 @@ class cap_generation(Operator):
         bottom = bpy.data.objects["bottom_cutout"]
         ear = bpy.data.objects["ear_cutout"]
 
-        # In `blender --background`, nothing forces a depsgraph evaluation
-        # before this point the way a real interactive session's continuous
-        # viewport redraws would - make sure headmesh has actually been
+        # make sure headmesh has actually been
         # evaluated at least once before the first boolean modifier goes on.
         bpy.context.view_layer.update()
 

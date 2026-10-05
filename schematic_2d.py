@@ -2,11 +2,6 @@
 schematic_2d.py  —  NeuroCaptain
 2-D optode schematic using Blender's image pixel buffer.
 No GPU module required.
-
-This is v2 (the working dark-navy version) with three additions:
-  1. collect_connections() reads mesh edges + optode_names_ordered  (was broken)
-  2. Bitmap font for landmark labels
-  3. Proper nose triangle + oval ears
 """
 
 import math

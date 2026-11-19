@@ -14,13 +14,208 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 from .optode_connect import (
+    DUMMY_COLLECTION,
+    DUMMY_COLOR,
     get_or_create_collection,
     add_to_collection,
     create_anchor_ring_material,
     create_connection_material,
+    encode_spring_states_on_mesh,
+    hidden_dummy_names,
+    is_dummy_name,
+    set_dummy_visibility,
     setup_optode_hooks,
 )
 from .landmark_labels import get_landmark_labels
+
+# Connections shorter than this (mm) are short-separation channels.
+SHORT_SEP_MM = 15.0
+
+
+def template_rest_shape(vertices, names, template, connections):
+    """
+    Cloth rest shape = the probe's design shape from the JSON.
+
+    The template optode positions (from the head the probe was designed on)
+    are fitted onto the current positions with rotation, translation and one
+    uniform scale (scale = median rest_length / template distance over the
+    stiff connections, so it follows any head scaling of the rest lengths).
+    Unlike relaxing the current positions toward the rest lengths, this keeps
+    the probe's full 3D shape, so every stiff spring - including the many that
+    do not form closed triangles - gets its design length.
+
+    Returns None when an optode has no template position (old JSON files);
+    callers then fall back to _compute_rest_shape.
+    """
+    if not connections or any(n not in template for n in names):
+        return None
+    ratios = [float(cd["rest_length"]) / np.linalg.norm(
+                  np.asarray(template[cd["optode1"]]) - np.asarray(template[cd["optode2"]]))
+              for cd in connections
+              if cd["optode1"] in template and cd["optode2"] in template
+              and np.linalg.norm(np.asarray(template[cd["optode1"]])
+                                 - np.asarray(template[cd["optode2"]])) > 1e-6]
+    if not ratios:
+        return None
+    s = float(np.median(ratios))
+    X = np.array([template[n] for n in names], dtype=np.float64)
+    Y = np.array([list(v) for v in vertices], dtype=np.float64)
+    Xc, Yc = X - X.mean(0), Y - Y.mean(0)
+    U, _, Vt = np.linalg.svd(Xc.T @ Yc)
+    D = np.diag([1.0, 1.0, np.sign(np.linalg.det(U @ Vt))])
+    R = (U @ D @ Vt).T
+    return [Vector((s * R @ x + Y.mean(0)).tolist()) for x in Xc]
+
+
+# Cloth stiffness of a soft spring (flexible, or to a dummy optode) as a
+# fraction of the stiff-spring stiffness.
+SOFT_SPRING_FRACTION = 0.05
+
+
+def connection_triangles(n, edges):
+    """Triangles of the spring graph (the cloth's faces) and the edges that
+    are not part of one."""
+    neighbors = defaultdict(set)
+    for i1, i2 in edges:
+        neighbors[i1].add(i2)
+        neighbors[i2].add(i1)
+
+    tri_faces = []
+    seen_tris = set()
+    for i1 in range(n):
+        for i2 in neighbors[i1]:
+            if i2 <= i1:
+                continue
+            for i3 in (neighbors[i1] & neighbors[i2]):
+                if i3 <= i2:
+                    continue
+                tri = (i1, i2, i3)
+                if tri not in seen_tris:
+                    seen_tris.add(tri)
+                    tri_faces.append(tri)
+
+    face_edge_set = set()
+    for f in tri_faces:
+        for j in range(3):
+            a, b = f[j], f[(j + 1) % 3]
+            face_edge_set.add((min(a, b), max(a, b)))
+    extra_edges = [(a, b) for a, b in edges
+                   if (min(a, b), max(a, b)) not in face_edge_set]
+    return tri_faces, extra_edges
+
+
+def split_soft_springs(n, edges, soft_pairs):
+    """
+    Cloth topology in which every soft spring runs through two extra
+    vertices (indices n, n+1, ...).
+
+    Blender cloth sets stiffness per vertex, not per edge: a spring's
+    stiffness is the minimum plus the mean weight of its two vertices times
+    (maximum - minimum).  The extra vertices get weight 0, so the middle
+    segment of each chain has the minimum stiffness and the spring as a
+    whole barely resists stretching, while stiff springs (weight 1 at both
+    ends) keep the full stiffness.  Returns (tri_faces, loose_edges, chains);
+    chains[k] = (i, j) for the extra vertices n + 2k and n + 2k + 1.
+    """
+    stiff = [e for e in edges if (min(e), max(e)) not in soft_pairs]
+    tri_faces, loose = connection_triangles(n, stiff)
+    chains = []
+    for i, j in edges:
+        if (min(i, j), max(i, j)) in soft_pairs:
+            a = n + 2 * len(chains)
+            loose += [(i, a), (a, a + 1), (a + 1, j)]
+            chains.append((i, j))
+    return tri_faces, loose, chains
+
+
+def chain_points(points, chains):
+    """Positions of the extra chain vertices, at 1/3 and 2/3 along each spring."""
+    out = []
+    for i, j in chains:
+        p, q = Vector(points[i]), Vector(points[j])
+        out += [p.lerp(q, 1.0 / 3.0), p.lerp(q, 2.0 / 3.0)]
+    return out
+
+
+# Rounds of "fit to scalp" after the cloth: stiff springs back to their rest
+# length, then onto the scalp.  More rounds barely improve the shape but let
+# the probe drift further from its barycentric placement.
+FIT_TO_SCALP_ITERATIONS = 30
+
+
+def fit_to_scalp(positions, names, spring_states, fixed, head_bvh,
+                 n_iter=FIT_TO_SCALP_ITERATIONS):
+    """
+    Put the relaxed probe on the scalp without squashing it.
+
+    The cloth keeps the probe's designed shape but floats it off a head
+    that is smaller than the design head; snapping straight onto the scalp
+    then shortens every spring.  This alternates moving the two ends of each
+    stiff optode-optode spring back to its rest length (fixed optodes do not
+    move) with snapping the free optodes onto the scalp, ending on a snap.
+    Flexible springs and springs to dummy optodes are left to the cloth.
+    Returns the new positions as Vectors, in the order of `names`.
+    """
+    idx = {n: i for i, n in enumerate(names)}
+    pos = np.array([list(p) for p in positions], dtype=np.float64)
+    free = np.array([n not in fixed for n in names])
+    springs = [(idx[ss["optode1"]], idx[ss["optode2"]], float(ss["rest_length"]))
+               for ss in spring_states.values()
+               if not ss.get("is_flexible", False)
+               and ss["optode1"] in idx and ss["optode2"] in idx
+               and not is_dummy_name(ss["optode1"]) and not is_dummy_name(ss["optode2"])]
+    for _ in range(n_iter):
+        for a, b, rest in springs:
+            d = pos[b] - pos[a]
+            dist = np.linalg.norm(d)
+            n_free = int(free[a]) + int(free[b])
+            if dist < 1e-9 or n_free == 0:
+                continue
+            c = (dist - rest) / dist * d / n_free
+            if free[a]:
+                pos[a] += c
+            if free[b]:
+                pos[b] -= c
+        for i in np.where(free)[0]:
+            loc = head_bvh.find_nearest(Vector(pos[i]))[0]
+            if loc is not None:
+                pos[i] = np.array(loc)
+    return [Vector(p.tolist()) for p in pos]
+
+
+def set_cloth_stiffness(settings, spring_stiffness):
+    """Stiff springs get spring_stiffness, soft-spring chains the minimum."""
+    settings.tension_stiffness = spring_stiffness * SOFT_SPRING_FRACTION
+    settings.compression_stiffness = spring_stiffness * SOFT_SPRING_FRACTION
+    settings.tension_stiffness_max = spring_stiffness
+    settings.compression_stiffness_max = spring_stiffness
+
+
+def estimate_rest_length_scale(positions, name_to_idx, connections):
+    """
+    Ratio of the probe's size on the target head to its size in the JSON.
+
+    Barycentric placement scales the whole probe with the head, but JSON
+    rest lengths are absolute distances from the head the probe was designed
+    on.  Relaxing toward those raw lengths squeezes the probe between its
+    anchors and drags single-spring optodes (short-separation detectors)
+    back to their original mm distance.  Multiplying every rest length by
+    this ratio keeps the probe - short-separation pairs included -
+    proportional to the head.  Uses the median over long connections, which
+    are less sensitive to placement noise than 8 mm short-separation pairs.
+    """
+    ratios, short_ratios = [], []
+    for cd in connections:
+        n1, n2 = cd["optode1"], cd["optode2"]
+        rest = float(cd["rest_length"])
+        if n1 not in name_to_idx or n2 not in name_to_idx or rest <= 1e-6:
+            continue
+        current = np.linalg.norm(
+            np.asarray(positions[name_to_idx[n2]]) - np.asarray(positions[name_to_idx[n1]])
+        )
+        (ratios if rest >= SHORT_SEP_MM else short_ratios).append(current / rest)
+    use = ratios or short_ratios
+    return float(np.median(use)) if use else 1.0
 
 
 class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
@@ -54,6 +249,14 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         default=1.0,
         min=0.01,
         max=10.0,
+    )
+
+    scale_rest_lengths: bpy.props.BoolProperty(
+        name="Scale Springs to Head",
+        description="Scale the JSON spring lengths by the probe's size on this head. "
+                    "Off (default): springs keep the probe's designed lengths, so stiff "
+                    "springs hold the real probe geometry and flexible ones settle",
+        default=False,
     )
 
     def invoke(self, context, event):
@@ -110,8 +313,12 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
                 initial_pos, headmesh
             )
 
-            color = SRC_COLOR if optode_type == "source" else DET_COLOR
-            coll_name = "Sources" if optode_type == "source" else "Detectors"
+            # Dummies are placed, relaxed and pinned like any other optode;
+            # only their colour, collection and visibility differ
+            color, coll_name = {
+                "source": (SRC_COLOR, "Sources"),
+                "dummy":  (DUMMY_COLOR, DUMMY_COLLECTION),
+            }.get(optode_type, (DET_COLOR, "Detectors"))
             coll = get_or_create_collection(coll_name)
 
             optode = self._create_optode_disc(
@@ -120,6 +327,12 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
             )
             add_to_collection(optode, coll)
             optode["is_anchor"] = 1 if is_anchor else 0
+            if optode_type == "dummy":
+                props = optode_data.get("custom_properties", {})
+                optode["is_dummy"] = 1
+                optode["show_dummy"] = int(props.get("show_dummy", 1))
+                if "anchor_landmark" in props:
+                    optode["anchor_landmark"] = props["anchor_landmark"]
 
             if is_anchor:
                 optode["anchor_pos"] = list(snapped_pos)
@@ -166,11 +379,26 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         edges = []
         spring_states = {}
 
+        rest_scale = 1.0
+        if self.scale_rest_lengths:
+            rest_scale = estimate_rest_length_scale(
+                vertices, name_to_idx, config.get("connections", []),
+            )
+        print(f"Spring rest-length scale (this head / JSON): {rest_scale:.3f}")
+        if not 0.5 <= rest_scale <= 2.0:
+            self.report({'WARNING'},
+                        f"Probe scaled x{rest_scale:.2f} to fit this head - "
+                        f"check the head mesh is in mm")
+
         n_opt = len(names_ordered)
         vertex_pull_sum = np.zeros(n_opt, dtype=np.float64)
         vertex_edge_count = np.zeros(n_opt, dtype=np.float64)
         vertex_has_fixed = np.zeros(n_opt, dtype=bool)
         connections_stiff = []
+        # Soft in the cloth: flexible springs, and springs to dummy optodes,
+        # which hold the probe near its landmarks while the probe body keeps
+        # its designed shape (the springs keep their stiff flag for export)
+        soft_pairs = set()
         n_stiff_edges = 0
         n_flexible_edges = 0
 
@@ -179,14 +407,18 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
             if n1 in name_to_idx and n2 in name_to_idx:
                 i1, i2 = name_to_idx[n1], name_to_idx[n2]
                 edges.append((i1, i2))
+                rest_length = float(cd["rest_length"]) * rest_scale
                 ek = f"{min(n1, n2)}_{max(n1, n2)}"
                 spring_states[ek] = {
                     "optode1": n1, "optode2": n2,
-                    "rest_length": cd["rest_length"],
+                    "rest_length": rest_length,
                     "pull": cd["pull"], "push": cd["push"],
                     "is_flexible": cd["is_flexible"],
                     "fix_distance": cd.get("fix_distance", False),
                 }
+                if not cd["is_flexible"]:
+                    # Unscaled length from the file, re-exported as-is
+                    spring_states[ek]["design_rest_length"] = float(cd["rest_length"])
                 pull = float(cd.get("pull", 0.9))
                 vertex_pull_sum[i1] += pull
                 vertex_pull_sum[i2] += pull
@@ -197,53 +429,33 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
                     vertex_has_fixed[i1] = True
                     vertex_has_fixed[i2] = True
 
+                if cd.get("is_flexible", False) or is_dummy_name(n1) or is_dummy_name(n2):
+                    soft_pairs.add((min(i1, i2), max(i1, i2)))
+
                 if not cd.get("is_flexible", False):
                     n_stiff_edges += 1
                     connections_stiff.append({
                         'optode1': n1, 'optode2': n2,
-                        'rest_length': float(cd['rest_length']),
+                        'rest_length': rest_length,
                     })
                 else:
                     n_flexible_edges += 1
 
         print(f"Springs — Stiff: {n_stiff_edges}   Flexible: {n_flexible_edges}")
 
-        # Find triangles in the connection graph to give the cloth sim faces
-        neighbors = defaultdict(set)
-        for i1, i2 in edges:
-            neighbors[i1].add(i2)
-            neighbors[i2].add(i1)
+        # Triangles of the stiff springs give the cloth sim faces; soft
+        # springs run through extra low-stiffness vertices (bake only)
+        tri_faces, cloth_edges, chains = split_soft_springs(n_opt, edges, soft_pairs)
+        print(f"Soft springs in the cloth (flexible or to a dummy): {len(chains)}")
 
-        tri_faces = []
-        seen_tris = set()
-        for i1 in range(len(names_ordered)):
-            for i2 in neighbors[i1]:
-                if i2 <= i1:
-                    continue
-                for i3 in (neighbors[i1] & neighbors[i2]):
-                    if i3 <= i2:
-                        continue
-                    tri = (i1, i2, i3)
-                    if tri not in seen_tris:
-                        seen_tris.add(tri)
-                        tri_faces.append(tri)
-
-        # Edges not already implied by triangle faces
-        face_edge_set = set()
-        for f in tri_faces:
-            for j in range(3):
-                a, b = f[j], f[(j + 1) % 3]
-                face_edge_set.add((min(a, b), max(a, b)))
-        extra_edges = [(a, b) for a, b in edges
-                       if (min(a, b), max(a, b)) not in face_edge_set]
-
-        mesh_data.from_pydata(vertices, extra_edges, tri_faces)
+        mesh_data.from_pydata(vertices + chain_points(vertices, chains), cloth_edges, tri_faces)
         mesh_data.update()
         print(f"\nConnection mesh: {len(vertices)} verts, {len(edges)} edges, "
               f"{len(tri_faces)} triangle faces")
 
         conn_obj["spring_states"] = spring_states
         conn_obj["optode_names_ordered"] = names_ordered
+        conn_obj["rest_length_scale"] = rest_scale
 
         mat = bpy.data.materials.get("Connection_Material")
         if not mat:
@@ -261,19 +473,30 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         initial_np = np.array([list(v) for v in vertices])
 
         # ── Shape keys for cloth rest lengths ────────────────────────────
-        # Only stiff edges drive the rest shape — flexible edges get whatever
-        # length falls out naturally, so they don't impose a distance target.
+        # Soft springs (flexible / to dummies) barely resist leaving their
+        # rest length, so in practice the stiff springs set the shape.
         conn_obj.shape_key_add(name="Basis", from_mix=False)
 
         anchor_mask = np.array(
             [bool(optode_objects[n].get("is_anchor", 0)) for n in names_ordered],
             dtype=bool,
         )
-        rest_positions = self._compute_rest_shape(
-            vertices, name_to_idx, connections_stiff, anchor_mask,
+        # Rest shape = the JSON design shape (falls back to relaxing toward
+        # the rest lengths for files without template positions)
+        template = {o["name"]: o["position"] for o in config.get("optodes", [])
+                    if "position" in o}
+        conn_obj["template_positions"] = {n: list(template[n]) for n in names_ordered
+                                          if n in template}
+        rest_positions = template_rest_shape(
+            vertices, names_ordered, template, connections_stiff,
         )
+        print(f"Rest shape: {'JSON template shape' if rest_positions else 'relaxed rest lengths'}")
+        if rest_positions is None:
+            rest_positions = self._compute_rest_shape(
+                vertices, name_to_idx, connections_stiff, anchor_mask,
+            )
         rest_key = conn_obj.shape_key_add(name="Rest", from_mix=False)
-        for i, rpos in enumerate(rest_positions):
+        for i, rpos in enumerate(list(rest_positions) + chain_points(rest_positions, chains)):
             rest_key.data[i].co = rpos
 
         # Log a few edge length comparisons
@@ -283,7 +506,7 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         for cd in sample_conns[:5]:
             i1, i2 = name_to_idx[cd["optode1"]], name_to_idx[cd["optode2"]]
             cur = np.linalg.norm(initial_np[i2] - initial_np[i1])
-            tgt = float(cd["rest_length"])
+            tgt = float(cd["rest_length"]) * rest_scale
             rst = np.linalg.norm(rest_np[i2] - rest_np[i1])
             print(f"  {cd['optode1']}-{cd['optode2']}: "
                   f"current={cur:.3f}  json_rest={tgt:.3f}  rest_shape={rst:.3f}")
@@ -293,6 +516,9 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         for i, name in enumerate(names_ordered):
             is_anch = bool(optode_objects[name].get("is_anchor", 0))
             pin_group.add([i], 1.0 if is_anch else 0.0, 'REPLACE')
+        chain_verts = list(range(n_opt, n_opt + 2 * len(chains)))
+        if chain_verts:
+            pin_group.add(chain_verts, 0.0, 'REPLACE')
 
         n_anchors = int(anchor_mask.sum())
         print(f"\nPins: {n_anchors} anchors pinned, "
@@ -307,6 +533,8 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         stiffness_group = conn_obj.vertex_groups.new(name="Stiffness")
         for i in range(n_opt):
             stiffness_group.add([i], float(vertex_weights[i]), 'REPLACE')
+        if chain_verts:
+            stiffness_group.add(chain_verts, 0.0, 'REPLACE')
 
         n_fixed = int(vertex_has_fixed.sum())
         print(f"Stiffness weights: min={vertex_weights.min():.3f} "
@@ -321,8 +549,7 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         settings.vertex_group_mass = "Pins"
         settings.pin_stiffness = self.pin_stiffness
 
-        settings.tension_stiffness = self.spring_stiffness
-        settings.compression_stiffness = self.spring_stiffness
+        set_cloth_stiffness(settings, self.spring_stiffness)
         settings.vertex_group_structural_stiffness = "Stiffness"
         settings.shear_stiffness = 0.0
         settings.bending_stiffness = 0.0
@@ -364,7 +591,7 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         eval_mesh = eval_obj.to_mesh()
 
         final_positions = []
-        for vert in eval_mesh.vertices:
+        for vert in eval_mesh.vertices[:n_opt]:     # not the soft-spring chain vertices
             final_positions.append(
                 Vector(conn_obj.matrix_world @ vert.co)
             )
@@ -389,6 +616,11 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
             loc, normal, _, _ = head_bvh.find_nearest(final_positions[i])
             if loc is not None:
                 final_positions[i] = Vector(loc)
+        final_positions = fit_to_scalp(
+            final_positions, names_ordered, spring_states,
+            {n for n, a in zip(names_ordered, anchor_mask) if a}, head_bvh,
+        )
+        for i, name in enumerate(names_ordered):
             optode_objects[name].location = final_positions[i]
             conn_obj.data.vertices[i].co = conn_inv @ final_positions[i]
         conn_obj.data.update()
@@ -437,7 +669,12 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
 
         bm.verts.ensure_lookup_table()
 
+        # Springs to hidden dummies stay in spring_states but are not drawn
+        hidden = {name_to_idx[n] for n in names_ordered
+                  if is_dummy_name(n) and not optode_objects[n].get("show_dummy", 1)}
         for i1, i2 in edges:
+            if i1 in hidden or i2 in hidden:
+                continue
             bm.edges.new([bm.verts[i1], bm.verts[i2]])
 
         bm.to_mesh(new_mesh)
@@ -449,9 +686,14 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
         conn_obj.display_type = 'WIRE'
 
         create_connection_material(conn_obj, "Optode_Connection_Stiff", (0.2, 0.5, 1.0, 1.0))
+        n_flex = encode_spring_states_on_mesh(conn_obj, names_ordered)
+        print(f"Spring stiffness: {len(spring_states) - n_flex} stiff, {n_flex} flexible")
 
         optodes_ordered = [optode_objects[n] for n in names_ordered]
         setup_optode_hooks(conn_obj, optodes_ordered)
+        for n in names_ordered:
+            if is_dummy_name(n):
+                set_dummy_visibility(optode_objects[n], optode_objects[n]["show_dummy"])
         context.view_layer.update()
 
         self.report(
@@ -826,11 +1068,21 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
         idx1, idx2 = edge.vertices[:]
         if idx1 < n_verts and idx2 < n_verts:
             edges.append((idx1, idx2))
+    # Springs with no drawn edge (to hidden dummies) still take part
+    edge_set = {(min(a, b), max(a, b)) for a, b in edges}
+    for ss in spring_states.values():
+        n1, n2 = ss['optode1'], ss['optode2']
+        if n1 in name_to_idx and n2 in name_to_idx:
+            pair = tuple(sorted((name_to_idx[n1], name_to_idx[n2])))
+            if pair not in edge_set:
+                edge_set.add(pair)
+                edges.append(pair)
 
     connections_stiff = []
     vertex_pull_sum = np.zeros(n_verts, dtype=np.float64)
     vertex_edge_count = np.zeros(n_verts, dtype=np.float64)
     vertex_has_fixed = np.zeros(n_verts, dtype=bool)
+    soft_pairs = set()      # flexible springs and springs to dummies: soft in the cloth
     n_stiff = 0
     n_flexible = 0
 
@@ -848,6 +1100,9 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
                 vertex_has_fixed[i1] = True
                 vertex_has_fixed[i2] = True
 
+            if ss.get('is_flexible', False) or is_dummy_name(n1) or is_dummy_name(n2):
+                soft_pairs.add((min(i1, i2), max(i1, i2)))
+
             if not ss.get('is_flexible', False):
                 n_stiff += 1
                 connections_stiff.append({
@@ -864,53 +1119,40 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
             report_callback({'ERROR'}, "No edges found on connection mesh")
         return None
 
-    neighbors = defaultdict(set)
-    for i1, i2 in edges:
-        neighbors[i1].add(i2)
-        neighbors[i2].add(i1)
-
-    tri_faces = []
-    seen_tris = set()
-    for i1 in range(n_verts):
-        for i2 in neighbors[i1]:
-            if i2 <= i1:
-                continue
-            for i3 in (neighbors[i1] & neighbors[i2]):
-                if i3 <= i2:
-                    continue
-                tri = (i1, i2, i3)
-                if tri not in seen_tris:
-                    seen_tris.add(tri)
-                    tri_faces.append(tri)
-
-    face_edge_set = set()
-    for f in tri_faces:
-        for j in range(3):
-            a, b = f[j], f[(j + 1) % 3]
-            face_edge_set.add((min(a, b), max(a, b)))
-    extra_edges = [(a, b) for a, b in edges
-                   if (min(a, b), max(a, b)) not in face_edge_set]
+    # Final mesh topology, and the cloth topology with soft-spring chains
+    tri_faces, extra_edges = connection_triangles(n_verts, edges)
+    cloth_faces, cloth_edges, chains = split_soft_springs(n_verts, edges, soft_pairs)
 
     vertices_vec = [Vector(positions[i].tolist()) for i in range(n_verts)]
     conn_obj.data.clear_geometry()
-    conn_obj.data.from_pydata(vertices_vec, extra_edges, tri_faces)
+    conn_obj.data.from_pydata(vertices_vec + chain_points(vertices_vec, chains),
+                              cloth_edges, cloth_faces)
     conn_obj.data.update()
 
     print(f"Mesh rebuilt: {n_verts} verts, {len(edges)} edges, "
-          f"{len(tri_faces)} triangle faces")
+          f"{len(cloth_faces)} triangle faces, {len(chains)} soft springs")
 
     conn_obj.shape_key_add(name="Basis", from_mix=False)
 
-    rest_positions = _compute_rest_shape_standalone(
-        vertices_vec, name_to_idx, connections_stiff, anchor_mask,
+    template = conn_obj.get("template_positions")
+    rest_positions = template_rest_shape(
+        vertices_vec, optode_names, template.to_dict() if template else {}, connections_stiff,
     )
+    print(f"Rest shape: {'JSON template shape' if rest_positions else 'relaxed rest lengths'}")
+    if rest_positions is None:
+        rest_positions = _compute_rest_shape_standalone(
+            vertices_vec, name_to_idx, connections_stiff, anchor_mask,
+        )
     rest_key = conn_obj.shape_key_add(name="Rest", from_mix=False)
-    for i, rpos in enumerate(rest_positions):
+    for i, rpos in enumerate(list(rest_positions) + chain_points(rest_positions, chains)):
         rest_key.data[i].co = rpos
 
     pin_group = conn_obj.vertex_groups.new(name="Pins")
     for i in range(n_verts):
         pin_group.add([i], 1.0 if is_anchor[i] else 0.0, 'REPLACE')
+    chain_verts = list(range(n_verts, n_verts + 2 * len(chains)))
+    if chain_verts:
+        pin_group.add(chain_verts, 0.0, 'REPLACE')
 
     n_anchors = int(anchor_mask.sum())
     print(f"Pins: {n_anchors} anchors pinned, {n_verts - n_anchors} free")
@@ -923,6 +1165,8 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
     stiffness_group = conn_obj.vertex_groups.new(name="Stiffness")
     for i in range(n_verts):
         stiffness_group.add([i], float(vertex_weights[i]), 'REPLACE')
+    if chain_verts:
+        stiffness_group.add(chain_verts, 0.0, 'REPLACE')
 
     n_fixed = int(vertex_has_fixed.sum())
     print(f"Stiffness weights: min={vertex_weights.min():.3f} "
@@ -936,8 +1180,7 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
     settings.vertex_group_mass = "Pins"
     settings.pin_stiffness = pin_stiffness
 
-    settings.tension_stiffness = spring_stiffness
-    settings.compression_stiffness = spring_stiffness
+    set_cloth_stiffness(settings, spring_stiffness)
     settings.vertex_group_structural_stiffness = "Stiffness"
     settings.shear_stiffness = 0.0
     settings.bending_stiffness = 0.0
@@ -976,7 +1219,7 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
     eval_mesh = eval_obj.to_mesh()
 
     final_positions = []
-    for vert in eval_mesh.vertices:
+    for vert in eval_mesh.vertices[:n_verts]:   # not the soft-spring chain vertices
         final_positions.append(Vector(conn_obj.matrix_world @ vert.co))
     eval_obj.to_mesh_clear()
 
@@ -990,6 +1233,11 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
     if conn_obj.data.shape_keys:
         bpy.ops.object.shape_key_remove(all=True)
 
+    # Back to the probe's own topology (drop the soft-spring chain vertices)
+    conn_obj.data.clear_geometry()
+    conn_obj.data.from_pydata(final_positions, extra_edges, tri_faces)
+    conn_obj.data.update()
+
     headmesh = bpy.data.objects["headmesh"]
     head_bvh = BVHTree.FromObject(headmesh, bpy.context.evaluated_depsgraph_get())
     conn_inv = conn_obj.matrix_world.inverted()
@@ -998,9 +1246,26 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
         loc, normal, _, _ = head_bvh.find_nearest(final_positions[i])
         if loc is not None:
             final_positions[i] = Vector(loc)
+    final_positions = fit_to_scalp(
+        final_positions, optode_names, spring_states,
+        {n for n, a in zip(optode_names, is_anchor) if a}, head_bvh,
+    )
+    for i, name in enumerate(optode_names):
         optode_objects[name].location = final_positions[i]
         conn_obj.data.vertices[i].co = conn_inv @ final_positions[i]
     conn_obj.data.update()
+
+    # Stop drawing springs to hidden dummies again (vertices are kept)
+    hidden = {i for i, n in enumerate(optode_names) if n in hidden_dummy_names()}
+    if hidden:
+        import bmesh
+        bm = bmesh.new()
+        bm.from_mesh(conn_obj.data)
+        drawn = [e for e in bm.edges
+                 if e.verts[0].index in hidden or e.verts[1].index in hidden]
+        bmesh.ops.delete(bm, geom=drawn, context='EDGES_FACES')
+        bm.to_mesh(conn_obj.data)
+        bm.free()
 
     bpy.ops.object.select_all(action='DESELECT')
     conn_obj.select_set(True)

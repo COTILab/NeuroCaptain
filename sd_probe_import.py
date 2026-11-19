@@ -4,8 +4,24 @@ from scipy.io import loadmat
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 from bpy.types import Operator
-from bpy.props import StringProperty
+from bpy.props import BoolProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
+
+from .optode_connect import (
+    DUMMY_COLLECTION,
+    DUMMY_COLOR,
+    edge_spring_layers,
+    ensure_flexible_visuals,
+    is_dummy_name,
+    set_dummy_visibility,
+    set_spring_flexible,
+    set_spring_stiff,
+)
+
+INCLUDE_DUMMIES_NAME = "Include dummy optodes in probe"
+INCLUDE_DUMMIES_DESC = ("Show the SD file's dummy optodes as part of the probe. "
+                        "If off they are hidden, but are still pinned at their "
+                        "landmarks and used for registration")
 
 def create_anchor_ring_material():
     mat_name = "Anchor_Ring_Material"
@@ -44,8 +60,22 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
 
     filename_ext = ".SD"
     filter_glob: StringProperty(default="*.SD;*.sd", options={'HIDDEN'})
+    include_dummies: BoolProperty(name=INCLUDE_DUMMIES_NAME,
+                                  description=INCLUDE_DUMMIES_DESC, default=False)
+    # Set only when started from the UI, so scripted calls skip the popup
+    ask_options: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
+
+    def invoke(self, context, event):
+        self.ask_options = True
+        return ImportHelper.invoke(self, context, event)
 
     def execute(self, context):
+        if self.ask_options:
+            # Blender can't open a dialog from the file browser callback, so
+            # hand the chosen file to the options popup, which runs the import
+            bpy.ops.neurocaptain.import_sd_probe_options('INVOKE_DEFAULT',
+                                                         filepath=self.filepath)
+            return {'FINISHED'}
         try:
             sd_file_path       = self.filepath
             head_mesh_name     = 'headmesh'
@@ -93,29 +123,33 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             src_pos_3d   = all_positions_3d[:n_srcs]
             det_pos_3d   = all_positions_3d[n_srcs:n_srcs + n_dets]
             dummy_pos_3d = all_positions_3d[n_srcs + n_dets:]
-            anchor_set   = set(matched_anchor_indices)  # dummy anchor indices
+            n_real       = n_srcs + n_dets
+            anchor_set   = set(matched_anchor_indices)
+            # Sources/detectors anchored directly in the SD AnchorList keep
+            # their anchor (and its landmark label)
+            anchor_labels = {idx: lbl for idx, lbl in zip(
+                matched_anchor_indices,
+                [sd_data['anchor_labels'][i] for i in matched_indices])}
+            direct_anchors = {i for i in anchor_set if i < n_real}
+            dummy_anchors  = anchor_set - direct_anchors
 
             sources_collection   = get_or_create_collection("Sources")
             detectors_collection = get_or_create_collection("Detectors")
             anchors_collection   = get_or_create_collection("Anchor Indicators")
             ring_mat             = create_anchor_ring_material()
 
-            # Build set of source/detector indices directly connected to an anchor dummy
-            anchor_adjacent = set()
-            if sd_data['spring_list'] is not None:
-                for spring in sd_data['spring_list']:
-                    i1 = int(spring[0]) - 1
-                    i2 = int(spring[1]) - 1
-                    if i1 in anchor_set and i2 not in anchor_set and i2 < n_srcs + n_dets:
-                        anchor_adjacent.add(i2)
-                    if i2 in anchor_set and i1 not in anchor_set and i1 < n_srcs + n_dets:
-                        anchor_adjacent.add(i1)
+            # The dummies are created below and are the anchors themselves, so
+            # the sources/detectors sprung to them stay free (as in AtlasViewer)
+            anchored = direct_anchors
+
             for i, pos in enumerate(src_pos_3d):
                 snapped_pos, normal = self.snap_to_mesh_surface(pos, head_mesh)
                 optode = self.create_optode_disc(snapped_pos, normal, f"Source_{i+1}",
                                                  source_color, optode_diameter, optode_thickness)
                 add_to_collection(optode, sources_collection)
-                if i in anchor_adjacent:
+                if i in direct_anchors:
+                    optode["anchor_landmark"] = anchor_labels[i]
+                if i in anchored:
                     optode["is_anchor"] = 1
                     bpy.ops.mesh.primitive_torus_add(location=(0, 0, 0),
                                                      major_radius=2.5, minor_radius=0.3)
@@ -135,7 +169,9 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                                                  detector_color, optode_diameter, optode_thickness)
                 add_to_collection(optode, detectors_collection)
                 anchor_idx = n_srcs + i
-                if anchor_idx in anchor_adjacent:
+                if anchor_idx in direct_anchors:
+                    optode["anchor_landmark"] = anchor_labels[anchor_idx]
+                if anchor_idx in anchored:
                     optode["is_anchor"] = 1
                     bpy.ops.mesh.primitive_torus_add(location=(0, 0, 0),
                                                      major_radius=2.5, minor_radius=0.3)
@@ -149,7 +185,33 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                 else:
                     optode["is_anchor"] = 0
 
-            # Dummies used internally only — not shown in viewport
+            # Dummies register and pin like any other optode; hiding them
+            # only affects what is drawn
+            dummies_collection = get_or_create_collection(DUMMY_COLLECTION)
+            dummies = []
+            for k, pos in enumerate(dummy_pos_3d):
+                sd_idx = n_real + k
+                snapped_pos, normal = self.snap_to_mesh_surface(pos, head_mesh)
+                optode = self.create_optode_disc(snapped_pos, normal, f"Dummy_{k+1}",
+                                                 DUMMY_COLOR, optode_diameter, optode_thickness)
+                add_to_collection(optode, dummies_collection)
+                optode["is_dummy"] = 1
+                optode["is_anchor"] = 1 if sd_idx in dummy_anchors else 0
+                if sd_idx in anchor_labels:
+                    optode["anchor_landmark"] = anchor_labels[sd_idx]
+                if sd_idx in dummy_anchors:
+                    bpy.ops.mesh.primitive_torus_add(location=(0, 0, 0),
+                                                     major_radius=2.5, minor_radius=0.3)
+                    ind = context.active_object
+                    add_to_collection(ind, anchors_collection)
+                    ind.name = f"Anchor_Ring_Dummy_{k+1}"
+                    ind.parent = optode
+                    ind.location = (0, 0, 0)
+                    ind.hide_render = True
+                    ind.data.materials.append(ring_mat)
+                dummies.append(optode)
+            for optode in dummies:
+                set_dummy_visibility(optode, self.include_dummies)
 
             # ── Connection mesh with spring type visualization ──────────
             self.create_connection_mesh(
@@ -158,7 +220,8 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             )
 
             self.report({'INFO'},
-                f"Created {len(src_pos_3d)} sources + {len(det_pos_3d)} detectors "
+                f"Created {len(src_pos_3d)} sources + {len(det_pos_3d)} detectors + "
+                f"{len(dummies)} {'shown' if self.include_dummies else 'hidden'} dummies "
                 f"({len(matched_anchor_indices)} anchors)")
             return {'FINISHED'}
 
@@ -171,14 +234,17 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
     # ------------------------------------------------------------------
     # SD file loading
     # ------------------------------------------------------------------
-    def load_sd_file(self, filepath):
+    @staticmethod
+    def load_sd_file(filepath):
         mat_data = loadmat(filepath)
         SD  = mat_data['SD']
         sd  = SD[0, 0]
 
         src_pos     = sd['SrcPos']
         det_pos     = sd['DetPos']
-        dummy_pos   = sd['DummyPos']
+        dummy_pos   = sd['DummyPos'] if 'DummyPos' in sd.dtype.names else np.zeros((0, 3))
+        if dummy_pos.size == 0:
+            dummy_pos = np.zeros((0, src_pos.shape[1]))
         anchor_list = sd['AnchorList']
         spring_list = sd['SpringList'] if 'SpringList' in sd.dtype.names else None
         n_srcs = int(sd['nSrcs'][0, 0])
@@ -204,6 +270,7 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             'spring_list':      spring_list,
             'n_srcs':           n_srcs,
             'n_dets':           n_dets,
+            'n_dummys':         len(dummy_pos),
         }
 
     # ------------------------------------------------------------------
@@ -507,9 +574,11 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                                spring_list, n_srcs, n_dets):
         """
         Build an Optode_Connections mesh from the SD SpringList.
-        Stiff springs (length > 0) → blue material.
-        Flexible springs (length == -1) → orange material.
-        spring_states stored on object for JSON export compatibility.
+        Stiff springs (length > 0) keep the SD length as their designed rest
+        length; flexible springs (length == -1) use the registered distance.
+        Stiffness is encoded with the same helpers as Make Springs Stiff /
+        Flexible, so it is shown on the mesh and carried into JSON export.
+        Springs to hidden dummies are kept in spring_states but get no edge.
         """
         import bmesh
 
@@ -518,16 +587,17 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
             bpy.data.objects.remove(bpy.data.objects["Optode_Connections"], do_unlink=True)
 
         # Build ordered optode list matching SD unified index scheme
-        # (sources first, then detectors — dummies excluded)
-        srcs = sorted([o for o in bpy.data.objects if o.name.startswith("Source_")],
-                      key=lambda x: int(x.name.split("_")[1]))
-        dets = sorted([o for o in bpy.data.objects if o.name.startswith("Detector_")],
-                      key=lambda x: int(x.name.split("_")[1]))
-        all_optodes = srcs + dets
+        # (sources, then detectors, then dummies)
+        def numbered(prefix):
+            return sorted([o for o in bpy.data.objects if o.name.startswith(prefix)],
+                          key=lambda x: int(x.name.split("_")[1]))
+        all_optodes = numbered("Source_") + numbered("Detector_") + numbered("Dummy_")
         optode_names = [o.name for o in all_optodes]
-        n_real = len(all_optodes)
+        n_opt = len(all_optodes)
+        hidden = {i for i, o in enumerate(all_optodes)
+                  if is_dummy_name(o.name) and not o.get("show_dummy", 1)}
 
-        if n_real == 0:
+        if n_opt == 0:
             return
 
         mesh    = bpy.data.meshes.new("Optode_Connections")
@@ -537,6 +607,7 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         bm = bmesh.new()
         verts_bm = [bm.verts.new(o.location) for o in all_optodes]
         bm.verts.ensure_lookup_table()
+        layers = edge_spring_layers(bm)
 
         spring_states = {}
         n_stiff = n_flex = 0
@@ -547,33 +618,24 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
                 i2 = int(spring[1]) - 1
                 s  = float(spring[2])
 
-                # Only connect real optodes (sources + detectors), skip dummies
-                if i1 >= n_real or i2 >= n_real:
+                if i1 >= n_opt or i2 >= n_opt:
                     continue
 
-                is_flexible = (s == -1.0)
-                rest_length = (all_optodes[i1].location -
-                               all_optodes[i2].location).length
-
-                try:
-                    bm.edges.new([verts_bm[i1], verts_bm[i2]])
-                except ValueError:
-                    pass  # edge already exists
-
+                if i1 in hidden or i2 in hidden:
+                    edge = None
+                else:
+                    edge = bm.edges.get([verts_bm[i1], verts_bm[i2]]) or \
+                        bm.edges.new([verts_bm[i1], verts_bm[i2]])
                 opt1, opt2 = optode_names[i1], optode_names[i2]
-                pair = sorted([opt1, opt2])
-                key  = f"{pair[0]}_{pair[1]}"
-                spring_states[key] = {
-                    "optode1":    opt1,
-                    "optode2":    opt2,
-                    "rest_length": rest_length if s == -1.0 else abs(s),
-                    "pull":        0.3 if is_flexible else 0.9,
-                    "push":        0.3 if is_flexible else 0.9,
-                    "is_flexible": is_flexible,
-                }
-                if is_flexible:
+
+                if s == -1.0:
+                    current = (all_optodes[i1].location - all_optodes[i2].location).length
+                    set_spring_flexible(spring_states, opt1, opt2, current,
+                                        edge=edge, layers=layers)
                     n_flex += 1
                 else:
+                    set_spring_stiff(spring_states, opt1, opt2, abs(s),
+                                     edge=edge, layers=layers, design_rest_length=abs(s))
                     n_stiff += 1
 
         bm.to_mesh(mesh)
@@ -584,34 +646,8 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         conn_obj["optode_names"]         = optode_names
         conn_obj["is_optode_connections"] = True
 
-        # Materials — blue = stiff, orange = flexible
-        def get_or_make_mat(name, color):
-            mat = bpy.data.materials.get(name)
-            if not mat:
-                mat = bpy.data.materials.new(name=name)
-                mat.use_nodes = True
-                mat.diffuse_color = color
-                bsdf = mat.node_tree.nodes.get("Principled BSDF")
-                if bsdf:
-                    bsdf.inputs['Base Color'].default_value = color
-            return mat
-
-        mat_stiff    = get_or_make_mat("Spring_Stiff",    (0.2, 0.5, 1.0, 1.0))  # blue
-        mat_flexible = get_or_make_mat("Spring_Flexible", (1.0, 0.6, 0.0, 1.0))  # orange
-        conn_obj.data.materials.append(mat_stiff)
-        conn_obj.data.materials.append(mat_flexible)
-
-        # Assign material per edge via bevel weight layer (stiff=0, flexible=1)
-        # Use edge crease to visually distinguish flexible springs
-        for edge in conn_obj.data.edges:
-            i1, i2 = edge.vertices[0], edge.vertices[1]
-            if i1 < len(optode_names) and i2 < len(optode_names):
-                opt1, opt2 = optode_names[i1], optode_names[i2]
-                pair = sorted([opt1, opt2])
-                key  = f"{pair[0]}_{pair[1]}"
-                if key in spring_states and spring_states[key]["is_flexible"]:
-                    # Mark flexible edges with edge crease for visual distinction
-                    conn_obj.data.edges[edge.index].crease = 1.0
+        if n_flex:
+            ensure_flexible_visuals(conn_obj)
 
         # Soft body modifier (consistent with JSON import)
         sb_mod = conn_obj.modifiers.new(name="Softbody", type='SOFT_BODY')
@@ -669,10 +705,55 @@ class NEUROCAPTAIN_OT_import_sd_probe(Operator, ImportHelper):
         return optode
 
 
+class NEUROCAPTAIN_OT_import_sd_probe_options(Operator):
+    """Choose whether the SD file's dummy optodes are shown, then import"""
+    bl_idname = "neurocaptain.import_sd_probe_options"
+    bl_label = "Import SD Probe"
+    bl_options = {'INTERNAL'}
+
+    filepath: StringProperty(options={'HIDDEN'})
+    include_dummies: BoolProperty(name=INCLUDE_DUMMIES_NAME,
+                                  description=INCLUDE_DUMMIES_DESC, default=False)
+    # Filled in invoke, shown in draw
+    n_dummys: bpy.props.IntProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    dummy_labels: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    def invoke(self, context, event):
+        try:
+            sd = NEUROCAPTAIN_OT_import_sd_probe.load_sd_file(self.filepath)
+        except Exception as e:
+            self.report({'ERROR'}, f"Could not read SD file: {e}")
+            return {'CANCELLED'}
+        if sd['n_dummys'] == 0:            # nothing to ask
+            return self.execute(context)
+        n_real = sd['n_srcs'] + sd['n_dets']
+        self.n_dummys = sd['n_dummys']
+        self.dummy_labels = ", ".join(
+            lbl for idx, lbl in zip(sd['anchor_indices'], sd['anchor_labels']) if idx >= n_real)
+        return context.window_manager.invoke_props_dialog(self, width=380)
+
+    def draw(self, context):
+        layout = self.layout
+        n = self.n_dummys
+        layout.label(text=f"This probe has {n} dummy optode{'s' if n != 1 else ''}"
+                          + (f" anchored to {self.dummy_labels}." if self.dummy_labels else "."))
+        layout.prop(self, "include_dummies")
+        col = layout.column(align=True)
+        col.scale_y = 0.8
+        col.label(text="Checked: shown as grey optodes with their springs.")
+        col.label(text="Unchecked: hidden, but still pinned and used for registration.")
+
+    def execute(self, context):
+        return bpy.ops.neurocaptain.import_sd_probe(
+            'EXEC_DEFAULT', filepath=self.filepath, include_dummies=self.include_dummies)
+
+
 def register():
     bpy.utils.register_class(NEUROCAPTAIN_OT_import_sd_probe)
+    bpy.utils.register_class(NEUROCAPTAIN_OT_import_sd_probe_options)
 
 def unregister():
+    bpy.utils.unregister_class(NEUROCAPTAIN_OT_import_sd_probe_options)
     bpy.utils.unregister_class(NEUROCAPTAIN_OT_import_sd_probe)
 
 if __name__ == "__main__":

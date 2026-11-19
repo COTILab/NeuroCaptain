@@ -528,7 +528,14 @@ class NJ_OT_load_dataset(Operator):
         obj['neurojson_dataset_key'] = self.dataset_key
 
         msg = f"Imported {name}: {len(verts)}v {len(faces_bl)}f"
-        self.report({'INFO'}, msg)
+        from .head_units import head_size, suggested_scale
+        factor = suggested_scale(head_size(obj))
+        if factor is not None:
+            msg += (f" - {head_size(obj):.0f} units across, probably not mm"
+                    + (f"; use 'Scale Head x{factor:g}' in the NeuroCaptain panel" if factor else ""))
+            self.report({'WARNING'}, msg)
+        else:
+            self.report({'INFO'}, msg)
 
     # ------------------------------------------------------------------
     def _show_info(self, context, data):

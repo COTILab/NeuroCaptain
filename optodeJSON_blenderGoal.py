@@ -67,6 +67,25 @@ def template_rest_shape(vertices, names, template, connections):
     return [Vector((s * R @ x + Y.mean(0)).tolist()) for x in Xc]
 
 
+def pin_anchors_in_rest_shape(rest_positions, vertices, anchor_mask):
+    """
+    Put each anchor (pinned optode or dummy) at its placed position in the
+    cloth rest shape.
+
+    Blender 5.x pins a vertex to its position in the rest shape key, while
+    3.4 pins it to the mesh position. With a design-size template as the
+    rest shape, 5.x dragged anchors toward the template (48 mm on a 2x
+    head). Matching the two makes pinning version-independent. Springs to
+    an anchor get a slightly different rest length during the cloth; the
+    fit_to_scalp pass afterwards restores stiff springs to design length.
+    """
+    out = list(rest_positions)
+    for i, is_anchor in enumerate(anchor_mask):
+        if is_anchor:
+            out[i] = Vector(vertices[i])
+    return out
+
+
 # Cloth stiffness of a soft spring (flexible, or to a dummy optode) as a
 # fraction of the stiff-spring stiffness.
 SOFT_SPRING_FRACTION = 0.05
@@ -495,6 +514,7 @@ class NEUROCAPTAIN_OT_import_optode_json_blender_goal(bpy.types.Operator):
             rest_positions = self._compute_rest_shape(
                 vertices, name_to_idx, connections_stiff, anchor_mask,
             )
+        rest_positions = pin_anchors_in_rest_shape(rest_positions, vertices, anchor_mask)
         rest_key = conn_obj.shape_key_add(name="Rest", from_mix=False)
         for i, rpos in enumerate(list(rest_positions) + chain_points(rest_positions, chains)):
             rest_key.data[i].co = rpos
@@ -1143,6 +1163,7 @@ def run_cloth_relaxation(conn_obj, optode_objects, simulation_frames=100,
         rest_positions = _compute_rest_shape_standalone(
             vertices_vec, name_to_idx, connections_stiff, anchor_mask,
         )
+    rest_positions = pin_anchors_in_rest_shape(rest_positions, vertices_vec, anchor_mask)
     rest_key = conn_obj.shape_key_add(name="Rest", from_mix=False)
     for i, rpos in enumerate(list(rest_positions) + chain_points(rest_positions, chains)):
         rest_key.data[i].co = rpos

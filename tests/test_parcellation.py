@@ -22,6 +22,33 @@ FACES = [[1, 3, 5], [3, 2, 5], [2, 4, 5], [4, 1, 5],
 LABELS = [1, 1, 24, 24, 58, 58, 0, 0]  # lh-bankssts, lh/rh-precuneus, unlabelled
 
 
+def _box_tet_mesh(size, n):
+    """Tetrahedral mesh of the cube [0, size]^3: an n x n x n grid of cells,
+    each split into 6 tets around its main diagonal (Kuhn split, conforming
+    across cells), all positively oriented. Elements are 1-based. Built in
+    numpy so the test doesn't need tetgen (missing on some CI runners)."""
+    g = np.linspace(0.0, size, n + 1)
+    node = np.array(np.meshgrid(g, g, g, indexing="ij")).reshape(3, -1).T
+    idx = lambda i, j, k: (i * (n + 1) + j) * (n + 1) + k
+    paths = [(0, 1, 2), (0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0)]
+    elem = []
+    for i in range(n):
+        for j in range(n):
+            for k in range(n):
+                for p in paths:
+                    c = [i, j, k]
+                    tet = [idx(*c)]
+                    for ax in p:            # walk corner 0 -> 7 one axis at a time
+                        c[ax] += 1
+                        tet.append(idx(*c))
+                    elem.append(tet)
+    elem = np.array(elem, dtype=np.int64)
+    v = node[elem]
+    neg = np.einsum("ij,ij->i", v[:, 1] - v[:, 0], np.cross(v[:, 2] - v[:, 0], v[:, 3] - v[:, 0])) < 0
+    elem[neg, 2], elem[neg, 3] = elem[neg, 3], elem[neg, 2].copy()
+    return node, elem + 1
+
+
 class ParcellationTest(unittest.TestCase):
     addon = None
 
@@ -238,13 +265,7 @@ class ParcellationTest(unittest.TestCase):
         self.assertTrue(np.allclose(col[mi == 1, :3], [g, g, g], atol=1e-5))
 
     def test_builtin_surface_from_tets(self):
-        try:
-            import iso2mesh as i2m
-        except ImportError:
-            self.skipTest("iso2mesh not available")
-        node, _face, elem = i2m.meshabox([0, 0, 0], [20, 20, 20], 8)
-        node = np.asarray(node)[:, :3]
-        elem = np.asarray(elem)[:, :4].astype(np.int64)
+        node, elem = _box_tet_mesh(20.0, 8)
         cen = node[elem - 1].mean(axis=1)
         solver = np.full(len(elem), 4)
         region = np.where(cen[:, 0] < 10, 23, 57)

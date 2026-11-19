@@ -117,6 +117,148 @@ def load_mesh_from_jmsh(filepath):
         raise NotImplementedError("Binary BMSH format requires additional parsing. Please use .mat or text .jmsh format.")
 
 
+# ── Solver tissue labels ─────────────────────────────────────────────────────
+# OPTICAL_PROPERTIES (and redbird_runner's config) are keyed in NeuroCaptain /
+# Redbird order: 1 scalp, 2 skull, 3 CSF, 4 gray matter, 5 white matter.
+# SPM-derived meshes (SIAM spm5layer / fem5layer) use 1 GM, 2 WM, 3 CSF,
+# 4 skull, 5 scalp, and dkmerge meshes add cortical parcels as 100 + DK label.
+PARCEL_LABEL_MIN = 100          # labels > 100 are cortical parcels
+GM_LABEL = 4                    # gray matter in NeuroCaptain/Redbird order
+SPM_TO_CANONICAL = {1: 4, 2: 5, 3: 3, 4: 2, 5: 1}
+
+
+def detect_tissue_order(nodes, elems, tissue_labels, max_samples=200000):
+    """Guess the 1-5 label order from which tissue sits outermost (scalp).
+
+    Returns 'SPM' (label 5 outermost), 'CANONICAL' (label 1 outermost) or
+    'UNKNOWN'. Parcels (> PARCEL_LABEL_MIN) are ignored. Uses one node per
+    sampled element, so it stays cheap on multi-million-element meshes.
+    """
+    labels = np.asarray(tissue_labels).ravel()
+    el = np.asarray(elems)[:, 0].astype(np.int64)
+    if el.min() >= 1 and el.max() == len(nodes):
+        el = el - 1
+    step = max(1, len(labels) // max_samples)
+    lab_s, pos = labels[::step], np.asarray(nodes)[el[::step], :3]
+    r = np.linalg.norm(pos - np.asarray(nodes)[:, :3].mean(axis=0), axis=1)
+    med = {t: float(np.median(r[lab_s == t])) for t in range(1, 6) if np.any(lab_s == t)}
+    if len(med) < 2:
+        return 'UNKNOWN'
+    outer = max(med, key=med.get)
+    return {5: 'SPM', 1: 'CANONICAL'}.get(outer, 'UNKNOWN')
+
+
+# Tissue role -> solver label (the optics tables / configure dialogs' layers).
+ROLE_TO_SOLVER_LABEL = {'scalp': 1, 'skull': 2, 'csf': 3,
+                        'gray_matter': 4, 'white_matter': 5}
+_ROLE_EXACT = {
+    'scalp': 'scalp', 'skin': 'scalp', 'softtissue': 'scalp', 'soft': 'scalp',
+    'skull': 'skull', 'bone': 'skull',
+    'csf': 'csf', 'cerebrospinalfluid': 'csf',
+    'gm': 'gray_matter', 'gray': 'gray_matter', 'grey': 'gray_matter',
+    'cortex': 'gray_matter',
+    'wm': 'white_matter', 'white': 'white_matter',
+}
+_ROLE_CONTAINS = (('graymatter', 'gray_matter'), ('greymatter', 'gray_matter'),
+                  ('whitematter', 'white_matter'), ('cerebrospinal', 'csf'),
+                  ('scalp', 'scalp'), ('skull', 'skull'), ('csf', 'csf'))
+
+
+def normalize_role(text):
+    """Map a free-form role/name ('Grey Matter', 'gm', 'gray_matter', 'Skin')
+    to one of ROLE_TO_SOLVER_LABEL's keys, or None if not recognized."""
+    if not text:
+        return None
+    import re
+    compact = re.sub(r'[^a-z]', '', str(text).lower())
+    if compact in _ROLE_EXACT:
+        return _ROLE_EXACT[compact]
+    for key, role in _ROLE_CONTAINS:
+        if key in compact:
+            return role
+    return None
+
+
+def role_label_map(layer_info, labels_present):
+    """{mesh label: solver label} from importer-recorded roles, or None.
+
+    Only entries with an explicit 'role' count (the flexible / NIfTI
+    importers record them from the file, a sidecar JSON or the user's
+    answers); the fixed 5-layer importers only assume names, so they fall
+    back to geometry. Unrecognized roles get labels 6, 7, ... (default optics).
+    """
+    if not layer_info:
+        return None
+    mapping, unknown = {}, []
+    for lab in labels_present:
+        entry = layer_info.get(int(lab)) or layer_info.get(str(lab)) or {}
+        if 'role' not in entry:
+            return None
+        role = normalize_role(entry.get('role')) or normalize_role(entry.get('name'))
+        if role is None:
+            unknown.append(int(lab))
+        else:
+            mapping[int(lab)] = ROLE_TO_SOLVER_LABEL[role]
+    if not mapping:
+        return None
+    for i, lab in enumerate(unknown):
+        mapping[lab] = 6 + i
+        entry = layer_info.get(lab) or layer_info.get(str(lab)) or {}
+        print(f"  WARNING: layer {lab} ({entry.get('name', '?')}, role "
+              f"'{entry.get('role')}') has no optical properties; using defaults")
+    return mapping
+
+
+def prepare_solver_labels(tissue_labels, nodes=None, elems=None, order='AUTO',
+                          layer_info=None):
+    """Return (labels_for_solver, how) for pmmc / redbirdpy.
+
+    Solver labels are 1 scalp, 2 skull, 3 CSF, 4 GM, 5 WM, matching the
+    optics tables. Labels > PARCEL_LABEL_MIN (cortical parcels) always
+    become gray matter. The other labels are resolved by `order`:
+      'AUTO'      - tissue roles recorded at import (layer_info) if present,
+                    otherwise geometry (outermost tissue = scalp).
+      'CANONICAL' - labels are already 1 scalp ... 5 WM; left unchanged.
+      'SPM'       - 1 GM, 2 WM, 3 CSF, 4 skull, 5 scalp; converted.
+    The input array is not modified (callers keep it for ROI analysis).
+    """
+    raw = np.asarray(tissue_labels).astype(np.int32).ravel()
+    parcel = raw > PARCEL_LABEL_MIN
+    out = raw.copy()
+    how = order
+
+    mapping = None
+    if order == 'AUTO':
+        present = sorted(int(l) for l in np.unique(raw[~parcel & (raw > 0)]))
+        mapping = role_label_map(layer_info, present)
+        if mapping is not None:
+            how = 'ROLES'
+        else:
+            how = (detect_tissue_order(nodes, elems, raw)
+                   if nodes is not None and elems is not None else 'UNKNOWN')
+            if how == 'UNKNOWN':
+                print("  WARNING: no tissue roles and could not detect label "
+                      "order; assuming 1 scalp, 2 skull, 3 CSF, 4 GM, 5 WM")
+                how = 'CANONICAL'
+    if how == 'SPM':
+        mapping = SPM_TO_CANONICAL
+    if mapping:
+        for src, dst in mapping.items():
+            out[raw == src] = dst
+    out[parcel] = GM_LABEL
+
+    detail = (", ".join(f"{s}->{d}" for s, d in sorted(mapping.items()))
+              if mapping else "unchanged")
+    print(f"  Tissue labels resolved by {how}: {detail}; "
+          f"{int(parcel.sum()):,} parcel elements -> gray matter ({GM_LABEL})")
+    return out, how
+
+
+def _scene_tissue_order():
+    nc = getattr(bpy.context.scene, "neurocaptain_settings", None)
+    return getattr(nc, "tissue_label_order", 'AUTO') if nc else 'AUTO'
+
+
 def verify_five_layers(tissue_labels):
     """Verify mesh has 5 tissue layers."""
     unique_tissues = np.unique(tissue_labels[tissue_labels > 0])
@@ -253,9 +395,10 @@ def import_five_layer_mesh(filepath, context):
         
         # Store volumetric mesh data in object custom properties
         # Convert to lists for Blender storage
-        obj['volumetric_nodes'] = nodes.tolist()
-        obj['volumetric_elements'] = elems.tolist()
-        obj['tissue_labels'] = tissue_labels.tolist()
+        from .utils import store_array_prop
+        store_array_prop(obj, 'volumetric_nodes', np.asarray(nodes, dtype=np.float64))
+        store_array_prop(obj, 'volumetric_elements', np.asarray(elems, dtype=np.int32))
+        store_array_prop(obj, 'tissue_labels', np.asarray(tissue_labels, dtype=np.int32))
         obj['mesh_filepath'] = filepath
         
         # Orient mesh — always zero rotation
@@ -784,6 +927,7 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
     print("=" * 70)
 
     ref_obj = None
+    layer_info = None  # importer-recorded tissue roles, if any
 
     # Priority 1: layered mesh manager (lmm) — used by the UI 'From File (.mat)' button
     if lmm_module.is_mesh_loaded():
@@ -791,6 +935,7 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
         nodes        = lmm_module.LAYERED_MESH.nodes.copy()
         elems        = lmm_module.LAYERED_MESH.elems.copy()
         tissue_labels = lmm_module.LAYERED_MESH.tissue_labels.copy()
+        layer_info    = lmm_module.LAYERED_MESH.layer_info
         ref_obj = (bpy.data.objects.get('Head_Surface_5L') or
                    bpy.data.objects.get('headmesh'))
 
@@ -798,11 +943,12 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
         # Priority 2: FiveLayerHead in scene (legacy workflow)
         five_layer_obj = bpy.data.objects.get('FiveLayerHead')
 
-        if five_layer_obj and 'volumetric_nodes' in five_layer_obj:
+        from .utils import has_array_prop, load_array_prop
+        if five_layer_obj and has_array_prop(five_layer_obj, 'volumetric_nodes'):
             print("  Using FiveLayerHead from Blender scene")
-            nodes         = np.array(five_layer_obj['volumetric_nodes'],   dtype=np.float64)
-            elems         = np.array(five_layer_obj['volumetric_elements'], dtype=np.int32)
-            tissue_labels = np.array(five_layer_obj['tissue_labels'],       dtype=np.int32)
+            nodes         = load_array_prop(five_layer_obj, 'volumetric_nodes',    np.float64)
+            elems         = load_array_prop(five_layer_obj, 'volumetric_elements', np.int32)
+            tissue_labels = load_array_prop(five_layer_obj, 'tissue_labels',       np.int32)
             mesh_path = five_layer_obj.get('mesh_filepath', mesh_path)
             ref_obj = five_layer_obj
 
@@ -818,6 +964,12 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
 
     # Ensure tissue labels are valid
     tissue_labels[tissue_labels < 0] = 0
+
+    # Keep the original labels (parcels included) for ROI analysis; the
+    # solver gets parcels merged into gray matter, in NeuroCaptain order.
+    region_labels = tissue_labels.copy()
+    tissue_labels, tissue_order = prepare_solver_labels(
+        tissue_labels, nodes, elems, _scene_tissue_order(), layer_info)
 
     # Get reference surface for translation
     if ref_obj is None:
@@ -925,6 +1077,8 @@ def load_mesh_and_register_optodes(mesh_path=None, optical_properties=None):
         'nodes': nodes,
         'elems_for_mmc': elems_for_mmc,
         'tissue_labels': tissue_labels,
+        'region_labels': region_labels,
+        'tissue_order': tissue_order,
         'sources': np.array(sources),
         'source_dirs': np.array(source_dirs),
         'source_elem_idx': np.array(source_elem_idx, dtype=np.int32),
@@ -1109,7 +1263,19 @@ def visualize_on_cortex(results, data, smooth_iterations=5,
                     space.shading.type = 'SOLID'
                     space.shading.color_type = 'VERTEX'
 
+    _reapply_parcellation_overlay()
     print("  ✓ Done")
+
+
+def _reapply_parcellation_overlay():
+    """The heatmap material is rebuilt on every run; restore the
+    parcellation overlay's opacity / layer order on top of it."""
+    try:
+        from . import parcellation
+        if parcellation.get_parcellation_object(bpy.context.scene) is not None:
+            parcellation.apply_overlay(bpy.context.scene)
+    except Exception as e:  # overlay is cosmetic; never fail a sim over it
+        print(f"  (parcellation overlay not reapplied: {e})")
 
 
 def save_results(results, data, output_path, solver_type):

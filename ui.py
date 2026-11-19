@@ -49,6 +49,8 @@ from . import layered_mesh_manager as lmm
 from . import NeuroJSON_MeshLoader as njloader
 from . import schematic_2d
 from . import probe_variability
+from . import parcellation
+from .head_units import NEUROCAPTAIN_OT_rescale_head_mesh, draw_unit_warning
 
 
 # ============================================================================
@@ -65,6 +67,19 @@ class NeuroCaptainSettings(bpy.types.PropertyGroup):
             ("DEPS",     "Dependencies", "Dependency management"),
         ],
         default="CAPGEN",
+    )
+    tissue_label_order: bpy.props.EnumProperty(
+        name="Tissue Labels",
+        description=("How mesh labels are matched to tissue optical properties "
+                     "(Scalp, Skull, CSF, GM, WM). Labels > 100 (cortical parcels) "
+                     "always become gray matter"),
+        items=[
+            ('AUTO',      "Auto",              "Use the tissue roles recorded at import; if there are none, "
+                                               "detect the order from which tissue is outermost (scalp)"),
+            ('CANONICAL', "Scalp→WM (1-5)",    "1 scalp, 2 skull, 3 CSF, 4 GM, 5 WM (NeuroCaptain/Redbird)"),
+            ('SPM',       "SPM (GM→scalp)",    "1 GM, 2 WM, 3 CSF, 4 skull, 5 scalp (SPM / SIAM)"),
+        ],
+        default='AUTO',
     )
     sd_max_distance: bpy.props.FloatProperty(
         name="Max SD Distance (mm)",
@@ -972,6 +987,7 @@ class NEUROCAPTAIN_PT_capgen_subpanel(bpy.types.Panel):
 
         layout.separator()
         layout.label(text="Head Model & Landmark Geometry", icon="SHADING_SOLID")
+        draw_unit_warning(layout)
         row = layout.row()
         row.operator(select_model.bl_idname, text="Headmesh",   icon="USER").action = "ADD_HEADMESH"
         row.operator(select_model.bl_idname, text="10-20 Mesh", icon="OUTLINER_DATA_VOLUME").action = "ADD_BRAIN1020MESH"
@@ -999,9 +1015,12 @@ class NEUROCAPTAIN_PT_capgen_subpanel(bpy.types.Panel):
             row2.operator(brain1020mesh.bl_idname,
                           text=f"{label} (check)" if assigned else label,
                           icon="USER").action = action
+        layout.prop(scene, "neurocaptain_1020_ignore_ears")
         layout.operator(brain1020mesh.bl_idname,
                         text="10-20 Mesh Generation",
                         icon="OUTLINER_OB_POINTCLOUD").action = "BRAIN1020_MESH"
+        layout.operator("braincapgen.import_fiducials",
+                        text="Import Fiducials (.txt)", icon="IMPORT")
         layout.prop(scene, "save_landmark_file")
         if scene.save_landmark_file:
             layout.prop(scene, "save_landmark_filepath")
@@ -1065,6 +1084,8 @@ class NEUROCAPTAIN_PT_optodes_subpanel(bpy.types.Panel):
         layout = self.layout
         nc     = context.scene.neurocaptain_settings
         props  = context.scene.neurocaptain
+
+        draw_unit_warning(layout)
 
         # ── Placement ────────────────────────────────────────────────────
         layout.label(text="Placement", icon="EMPTY_SINGLE_ARROW")
@@ -1207,14 +1228,21 @@ class NEUROCAPTAIN_PT_lightsim_subpanel(bpy.types.Panel):
                          text="From File (any layer count)", icon="IMPORT")
         layout.operator("neurocaptain.import_layered_mesh_nifti",
                          text="From File (.nii segmented volume)", icon="IMPORT")
+        layout.operator("neurocaptain.import_parcellated_mesh",
+                         text="From File (.bmsh with built-in parcellation)", icon="IMPORT")
 
         layout.separator()
         njloader.draw_neurojson_browser(layout, context)
+
+        # ── Cortical parcellation (ROI coverage) ─────────────────────────
+        layout.separator()
+        parcellation.draw_parcellation_section(layout, context)
 
         # ── Analysis settings ────────────────────────────────────────────
         layout.separator()
         box = layout.box()
         box.label(text="Analysis Settings", icon="SETTINGS")
+        box.prop(nc, "tissue_label_order")
         box.prop(nc, "sd_max_distance")
         box.prop(nc, "smooth_iterations")
 
@@ -1332,6 +1360,7 @@ CLASSES = [
     NEUROCAPTAIN_OT_add_detector,
     NEUROCAPTAIN_OT_move_optode,
     NEUROCAPTAIN_OT_ensure_optode_constraints,
+    NEUROCAPTAIN_OT_rescale_head_mesh,
     NEUROCAPTAIN_PT_main_panel,
     NEUROCAPTAIN_PT_capgen_subpanel,
     NEUROCAPTAIN_PT_optodes_subpanel,
@@ -1343,6 +1372,7 @@ CLASSES = [
 def register():
     njloader.register()
     schematic_2d.register()
+    parcellation.register()
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.neurocaptain_settings = bpy.props.PointerProperty(type=NeuroCaptainSettings)
@@ -1352,5 +1382,6 @@ def unregister():
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.neurocaptain_settings
+    parcellation.unregister()
     schematic_2d.unregister()
     njloader.unregister()

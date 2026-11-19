@@ -8,7 +8,8 @@ import os
 import sys
 import time
 
-from .utils import recenter_on_volume_centroid, compute_volume_centroid_world
+from .utils import (fast_volface, recenter_on_volume_centroid, compute_volume_centroid_world,
+                    store_array_prop, load_array_prop, has_array_prop)
 
 try:
     import iso2mesh as i2m
@@ -169,6 +170,12 @@ class LayeredMeshData:
         # on this point, so mesh_coords = blender_coords + mesh_centroid).
         self.mesh_centroid = None
 
+        # Per-element cortical region labels (0 = not cortical), e.g. DK 1-68
+        # from a v2m dkmerge mesh (tissue label 100 + region). None if the
+        # mesh has no built-in parcellation.
+        self.region_labels = None
+        self.region_atlas = None
+
         # Blender objects
         self.head_surface_obj = None
         self.cortex_obj = None
@@ -218,9 +225,9 @@ def _persist_layered_mesh_to_object():
     obj = LAYERED_MESH.head_surface_obj
     if obj is None or LAYERED_MESH.nodes is None:
         return
-    obj['volumetric_nodes'] = LAYERED_MESH.nodes.tolist()
-    obj['volumetric_elements'] = LAYERED_MESH.elems.tolist()
-    obj['tissue_labels'] = LAYERED_MESH.tissue_labels.tolist()
+    store_array_prop(obj, 'volumetric_nodes', np.asarray(LAYERED_MESH.nodes, dtype=np.float64))
+    store_array_prop(obj, 'volumetric_elements', np.asarray(LAYERED_MESH.elems, dtype=np.int32))
+    store_array_prop(obj, 'tissue_labels', np.asarray(LAYERED_MESH.tissue_labels, dtype=np.int32))
     obj['mesh_filepath'] = LAYERED_MESH.mesh_path
     obj['num_layers'] = LAYERED_MESH.num_layers
     obj['layer_info_json'] = json.dumps(LAYERED_MESH.layer_info)
@@ -231,6 +238,76 @@ def _persist_layered_mesh_to_object():
         # .tolist(), not list() - the latter yields raw numpy scalars, which
         # crash Blender's ID-property assignment.
         obj['mesh_centroid'] = np.asarray(LAYERED_MESH.mesh_centroid).tolist()
+    if LAYERED_MESH.region_labels is not None:
+        # base64 int16 string: millions of elements, far cheaper than a list.
+        import base64
+        obj['region_labels_b64'] = base64.b64encode(
+            np.asarray(LAYERED_MESH.region_labels, dtype=np.int16).tobytes()).decode('ascii')
+        obj['region_atlas'] = LAYERED_MESH.region_atlas or ""
+    else:
+        for key in ('region_labels_b64', 'region_atlas'):
+            if key in obj:
+                del obj[key]
+
+
+def _ensure_headmesh_from_scalp(scalp_obj, name='headmesh'):
+    """If the scene has no `headmesh`, make one from the layered import's
+    scalp surface, so the landmark / cap / probe tools work without
+    importing a separate head surface.
+
+    It is a new, standalone surface mesh: only the scalp faces and the
+    vertices they use. (Head_Surface_5L itself keeps every volumetric node
+    as a vertex - the Redbird/MMC coordinate alignment relies on that - so
+    it can't simply be copied.) It keeps the scalp's exact transform, so it
+    lines up with the other layers and the simulation mesh, has no material,
+    and goes into the scene's main 'Collection' (or the top-level Scene
+    Collection if there isn't one), not FiveLayer_Visualization, which is
+    cleared on every re-import.
+    Returns the new object, or None if headmesh already exists.
+    """
+    scene = bpy.context.scene
+    if scalp_obj is None or scene.objects.get(name) is not None:
+        return None
+    stale = bpy.data.objects.get(name)  # exists in the file but not this scene
+    if stale is not None:
+        stale.name = name + "_old"
+
+    src = scalp_obj.data
+    co = np.empty(len(src.vertices) * 3, dtype=np.float32)
+    src.vertices.foreach_get("co", co)
+    loop_v = np.empty(len(src.loops), dtype=np.int32)
+    src.loops.foreach_get("vertex_index", loop_v)
+    loop_start = np.empty(len(src.polygons), dtype=np.int32)
+    src.polygons.foreach_get("loop_start", loop_start)
+    loop_total = np.empty(len(src.polygons), dtype=np.int32)
+    src.polygons.foreach_get("loop_total", loop_total)
+
+    used, new_loop_v = np.unique(loop_v, return_inverse=True)
+    new_co = co.reshape(-1, 3)[used]
+
+    me = bpy.data.meshes.new(name)
+    me.vertices.add(len(new_co))
+    me.vertices.foreach_set("co", new_co.ravel())
+    me.loops.add(len(new_loop_v))
+    me.loops.foreach_set("vertex_index", new_loop_v.astype(np.int32))
+    me.polygons.add(len(loop_start))
+    me.polygons.foreach_set("loop_start", loop_start)
+    try:  # read-only (derived) from Blender 4.0 on
+        me.polygons.foreach_set("loop_total", loop_total)
+    except (AttributeError, RuntimeError, TypeError):
+        pass
+    me.update(calc_edges=True)
+    me.validate()
+
+    head = bpy.data.objects.new(name, me)
+    head.matrix_world = scalp_obj.matrix_world.copy()
+
+    target = next((c for c in scene.collection.children if c.name == 'Collection'),
+                  scene.collection)
+    target.objects.link(head)
+    print(f"   OK '{name}' created from {scalp_obj.name}: {len(new_co):,} vertices, "
+          f"{len(loop_start):,} faces (in '{target.name}')")
+    return head
 
 
 def restore_layered_mesh_from_saved_data():
@@ -247,16 +324,17 @@ def restore_layered_mesh_from_saved_data():
         return False  # already populated this session, don't clobber it
 
     obj = next(
-        (o for o in bpy.data.objects if 'volumetric_nodes' in o.keys()),
+        (o for o in bpy.data.objects if has_array_prop(o, 'volumetric_nodes')),
         None,
     )
     if obj is None:
         return False
 
+    legacy = 'volumetric_nodes' in obj
     try:
-        LAYERED_MESH.nodes = np.array(obj['volumetric_nodes'], dtype=np.float64)
-        LAYERED_MESH.elems = np.array(obj['volumetric_elements'], dtype=np.int32)
-        LAYERED_MESH.tissue_labels = np.array(obj['tissue_labels'], dtype=np.int32)
+        LAYERED_MESH.nodes = load_array_prop(obj, 'volumetric_nodes', np.float64)
+        LAYERED_MESH.elems = load_array_prop(obj, 'volumetric_elements', np.int32)
+        LAYERED_MESH.tissue_labels = load_array_prop(obj, 'tissue_labels', np.int32)
         LAYERED_MESH.mesh_path = obj.get('mesh_filepath')
         LAYERED_MESH.num_layers = obj.get('num_layers', 0)
         layer_info_json = obj.get('layer_info_json')
@@ -266,6 +344,12 @@ def restore_layered_mesh_from_saved_data():
         )
         centroid = obj.get('mesh_centroid')
         LAYERED_MESH.mesh_centroid = np.array(centroid) if centroid else None
+        b64 = obj.get('region_labels_b64')
+        if b64:
+            import base64
+            LAYERED_MESH.region_labels = np.frombuffer(
+                base64.b64decode(b64), dtype=np.int16).astype(np.int32)
+            LAYERED_MESH.region_atlas = obj.get('region_atlas') or None
         LAYERED_MESH.head_surface_obj = obj
         cortex_name = obj.get('cortex_object_name')
         LAYERED_MESH.cortex_obj = bpy.data.objects.get(cortex_name) if cortex_name else None
@@ -273,6 +357,15 @@ def restore_layered_mesh_from_saved_data():
         print(f"Warning: found saved layered-mesh data but failed to restore it: {e}")
         LAYERED_MESH.__init__()
         return False
+
+    if legacy:
+        # Older .blend: rewrite in the compact format so the slow list
+        # properties are gone from the next save on.
+        try:
+            _persist_layered_mesh_to_object()
+            print("Converted saved layered-mesh data to compact storage")
+        except Exception as e:
+            print(f"Warning: could not convert saved layered-mesh data: {e}")
 
     print(f"Restored layered mesh from saved data ({LAYERED_MESH.num_layers} layers, "
           f"{len(LAYERED_MESH.nodes):,} nodes)")
@@ -306,7 +399,7 @@ def extract_outer_surface_only(node, elem, tissue_labels, target_tissue=1):
 
     tet_conn = _ensure_1indexed(elem[:, :4].astype(int))
 
-    openface, elemid = i2m.volface(tet_conn)
+    openface, elemid = fast_volface(tet_conn)
 
     # Convert to 0-indexed for Blender
     openface = _ensure_0indexed(openface.astype(int))
@@ -335,7 +428,7 @@ def extract_cortex_surface(node, elem, tissue_labels):
 
     brain_elems = _ensure_1indexed(brain_elems)
 
-    openface, elemid = i2m.volface(brain_elems)
+    openface, elemid = fast_volface(brain_elems)
 
     # Convert to 0-indexed for Blender
     openface = _ensure_0indexed(openface.astype(int))
@@ -353,7 +446,7 @@ def extract_layer_shell(node, elem, tissue_labels, target_labels):
     layer_elems = elem[mask][:, :4].astype(int)
     layer_elems = _ensure_1indexed(layer_elems)
 
-    openface, _ = i2m.volface(layer_elems)
+    openface, _ = fast_volface(layer_elems)
     openface = _ensure_0indexed(openface.astype(int))
     return openface
 
@@ -363,8 +456,18 @@ def create_mesh_object(name, vertices, faces, collection):
     mesh = bpy.data.meshes.new(name)
     obj = bpy.data.objects.new(name, mesh)
     
-    mesh.from_pydata(vertices.tolist(), [], [list(f) for f in faces])
-    mesh.update()
+    # Bulk-fill with foreach_set (from_pydata goes through Python lists:
+    # several seconds for a full 1.6M-node volumetric node array)
+    verts = np.ascontiguousarray(vertices, dtype=np.float32)[:, :3]
+    faces = np.asarray(faces, dtype=np.int32)
+    mesh.vertices.add(len(verts))
+    mesh.vertices.foreach_set("co", np.ascontiguousarray(verts).ravel())
+    mesh.loops.add(faces.size)
+    mesh.loops.foreach_set("vertex_index", faces.ravel())
+    mesh.polygons.add(len(faces))
+    mesh.polygons.foreach_set("loop_start", np.arange(0, faces.size, faces.shape[1], dtype=np.int32))
+    mesh.polygons.foreach_set("loop_total", np.full(len(faces), faces.shape[1], dtype=np.int32))
+    mesh.update(calc_edges=True)
     
     # link to scene temporarily for editing. Deselect everything else first -
     # Blender's multi-object edit mode would otherwise pull in whatever else
@@ -1056,6 +1159,7 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
     LAYERED_MESH.mesh_centroid = mesh_centroid
     LAYERED_MESH.head_surface_obj = head_obj
     LAYERED_MESH.cortex_obj = cortex_obj
+    _ensure_headmesh_from_scalp(head_obj)
     _persist_layered_mesh_to_object()
 
     bpy.ops.object.select_all(action='DESELECT')
@@ -1075,14 +1179,22 @@ def import_layered_head_model_flexible(mesh_path, reference_obj_name='headmesh',
 # MAIN IMPORT FUNCTION
 # =============================================================================
 
-def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
+_CANONICAL_ROLE_BY_ID = {1: 'scalp', 2: 'skull', 3: 'csf',
+                         4: 'gray_matter', 5: 'white_matter'}
+
+
+def import_layered_head_model(mesh_path, reference_obj_name='headmesh', source=None):
     """
     Import a multi-layer head model from .mat file
-    
+
     Args:
         mesh_path: Path to .mat file containing mesh data
         reference_obj_name: Name of reference object for orientation (default: 'headmesh')
-    
+        source: optional pre-loaded {'node', 'elem', 'tissue_labels'} with
+            labels already in 1 scalp ... 5 WM order (e.g. a converted v2m
+            dkmerge mesh). File loading is skipped; mesh_path is only
+            recorded as where the mesh came from.
+
     Returns:
         dict: Status dictionary with 'success', 'message', and 'info' keys
     """
@@ -1091,17 +1203,17 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
     print("\n" + "=" * 70)
     print("IMPORTING LAYERED HEAD MODEL")
     print("=" * 70)
-    
+
     # Validate path
     mesh_path = Path(mesh_path)
-    if not mesh_path.exists():
+    if source is None and not mesh_path.exists():
         return {
             'success': False,
             'message': f"File not found: {mesh_path}",
             'info': None
         }
-    
-    if not mesh_path.suffix.lower() == '.mat':
+
+    if source is None and not mesh_path.suffix.lower() == '.mat':
         return {
             'success': False,
             'message': "File must be a MATLAB .mat file",
@@ -1119,32 +1231,127 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
     # load mesh data
     print(f"\n1. Loading mesh from: {mesh_path.name}")
     try:
-        mat_data = sio.loadmat(str(mesh_path))
-        mesh_key = [k for k in mat_data.keys() if not k.startswith('__')][0]
-        mesh = mat_data[mesh_key][0, 0]
-        
-        node = np.array(mesh['node'], dtype=np.float64)
-        if node.ndim > 2:
-            node = node.squeeze()
-        if node.shape[1] > 3:
-            node = node[:, :3]
-        
-        elem = np.array(mesh['elem'], dtype=np.int32)
-        if elem.ndim > 2:
-            elem = elem.squeeze()
-        
-        tissue_labels = elem[:, 4].astype(np.int32) if elem.shape[1] >= 5 else np.ones(len(elem), dtype=np.int32)
-        
-        print(f"   ✓ Nodes: {len(node):,}")
-        print(f"   ✓ Elements: {len(elem):,}")
-        
+        if source is not None:
+            node = np.asarray(source['node'], dtype=np.float64)[:, :3]
+            elem = np.asarray(source['elem'], dtype=np.int32)
+            tissue_labels = np.asarray(source['tissue_labels'], dtype=np.int32)
+            print(f"   ✓ Nodes: {len(node):,} (pre-loaded)")
+            print(f"   ✓ Elements: {len(elem):,}")
+        else:
+            node, elem, tissue_labels = _load_mat_five_layer(mesh_path)
     except Exception as e:
         return {
             'success': False,
             'message': f"Failed to load mesh: {str(e)}",
             'info': None
         }
+
+    return _build_five_layer_scene(mesh_path, node, elem, tissue_labels,
+                                   reference_obj_name, t0)
+
+
+def import_parcellated_head_model(mesh_path, reference_obj_name='headmesh', order='AUTO'):
+    """Import a v2m "dkmerge" tetrahedral head model: tissue labels 1-5 plus
+    cortical parcels stored as 100 + region id inside the gray matter.
+
+    Tissue labels are converted to 1 scalp ... 5 WM (parcels -> gray matter)
+    and run through the normal 5-layer pipeline, so Head_Surface_5L /
+    Brain_Cortex_5L and the simulations behave exactly as for a plain
+    5-layer mesh. The parcel ids are kept per element in
+    LAYERED_MESH.region_labels for display and ROI analysis.
+
+    Args:
+        order: tissue label order of 1-5 in the file - 'AUTO' (geometry),
+            'SPM' (1 GM ... 5 scalp) or 'CANONICAL' (1 scalp ... 5 WM).
+    """
+    t0 = time.time()
+    mesh_path = Path(mesh_path)
+    print("\n" + "=" * 70)
+    print("IMPORTING PARCELLATED (dkmerge) HEAD MODEL")
+    print("=" * 70)
+    if not mesh_path.exists():
+        return {'success': False, 'message': f"File not found: {mesh_path}", 'info': None}
+    if not ISO2MESH_AVAILABLE:
+        return {'success': False, 'info': None,
+                'message': "iso2mesh is required for surface extraction. Install with: pip install iso2mesh"}
+
+    from .headmodels import _load_mesh_direct
+    from .lightsim_neurocaptain import prepare_solver_labels, PARCEL_LABEL_MIN
+    from .parcellation import detect_atlas
+
+    print(f"\n1. Loading mesh from: {mesh_path.name}")
+    try:
+        data = _load_mesh_direct(str(mesh_path))
+    except Exception as e:
+        return {'success': False, 'message': f"Failed to load mesh: {e}", 'info': None}
+    elem_key = next((k for k in ('MeshElem', 'MeshTet4') if k in data), None)
+    if 'MeshNode' not in data or elem_key is None:
+        return {'success': False, 'info': None,
+                'message': ("Not a tetrahedral head mesh (needs MeshNode + MeshElem); "
+                            "for a parcellation surface use 'Import Separate Surface'")}
+    node = np.asarray(data['MeshNode'], dtype=np.float64)[:, :3]
+    elem = np.asarray(data[elem_key])
+    if elem.ndim != 2 or elem.shape[1] < 5:
+        return {'success': False, 'info': None,
+                'message': "Mesh elements have no tissue label column"}
+
+    raw = elem[:, 4].astype(np.int32)
+    parcel = raw > PARCEL_LABEL_MIN
+    if not parcel.any():
+        return {'success': False, 'info': None,
+                'message': "No parcel labels (> 100) found; use the regular 5-layer import"}
+
+    print("\n   Resolving tissue label order...")
+    solver_labels, how = prepare_solver_labels(raw, node, elem[:, :4], order)
+    region = np.where(parcel, raw - PARCEL_LABEL_MIN, 0).astype(np.int32)
+    atlas = detect_atlas(region[parcel])
+    n_regions = len(np.unique(region[parcel]))
+    print(f"   {n_regions} built-in regions ({atlas}), {int(parcel.sum()):,} parcel elements")
+
+    elem_solver = elem[:, :5].astype(np.int32).copy()
+    elem_solver[:, 4] = solver_labels
+    result = _build_five_layer_scene(
+        mesh_path, node, elem_solver, solver_labels, reference_obj_name, t0,
+        region_labels=region, region_atlas=atlas, record_roles=True)
+    if result.get('success'):
+        result['message'] = (f"Imported parcellated head model: {n_regions} built-in "
+                             f"{atlas} regions (tissue order: {how})")
+        result['label_order'] = how
+        result['n_regions'] = n_regions
+    return result
+
+
+def _load_mat_five_layer(mesh_path):
+    """Read node/elem/tissue labels from a 5-layer .mat mesh struct."""
+    mat_data = sio.loadmat(str(mesh_path))
+    mesh_key = [k for k in mat_data.keys() if not k.startswith('__')][0]
+    mesh = mat_data[mesh_key][0, 0]
     
+    node = np.array(mesh['node'], dtype=np.float64)
+    if node.ndim > 2:
+        node = node.squeeze()
+    if node.shape[1] > 3:
+        node = node[:, :3]
+    
+    elem = np.array(mesh['elem'], dtype=np.int32)
+    if elem.ndim > 2:
+        elem = elem.squeeze()
+    
+    tissue_labels = elem[:, 4].astype(np.int32) if elem.shape[1] >= 5 else np.ones(len(elem), dtype=np.int32)
+    
+    print(f"   ✓ Nodes: {len(node):,}")
+    print(f"   ✓ Elements: {len(elem):,}")
+    return node, elem, tissue_labels
+
+
+def _build_five_layer_scene(mesh_path, node, elem, tissue_labels,
+                            reference_obj_name, t0, region_labels=None,
+                            region_atlas=None, record_roles=False):
+    """Steps 2+ of import_layered_head_model: surfaces, objects, state.
+    Labels must be in 1 scalp ... 5 WM order. region_labels: optional
+    per-element cortical region ids (0 = none) kept for ROI analysis."""
+    global LAYERED_MESH
+
     # analyze layers
     print("\n2. Analyzing tissue layers...")
     unique_labels = np.unique(tissue_labels)
@@ -1166,6 +1373,10 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
             'name': layer_names.get(int(label), f"Tissue {label}"),
             'count': int(count)
         }
+        if record_roles and int(label) in _CANONICAL_ROLE_BY_ID:
+            # Labels were converted to this order on purpose (e.g. dkmerge),
+            # so the roles are known, not assumed.
+            layer_info[int(label)]['role'] = _CANONICAL_ROLE_BY_ID[int(label)]
         print(f"   Layer {label}: {layer_info[int(label)]['name']} ({count:,} elements)")
     
     # extract surfaces using volface
@@ -1282,8 +1493,12 @@ def import_layered_head_model(mesh_path, reference_obj_name='headmesh'):
     LAYERED_MESH.mesh_centroid = mesh_centroid
     LAYERED_MESH.head_surface_obj = head_obj
     LAYERED_MESH.cortex_obj = cortex_obj
+    _ensure_headmesh_from_scalp(head_obj)
+    LAYERED_MESH.region_labels = (None if region_labels is None
+                                  else np.asarray(region_labels, dtype=np.int32))
+    LAYERED_MESH.region_atlas = region_atlas
     _persist_layered_mesh_to_object()
-    
+
     # Deselect all
     bpy.ops.object.select_all(action='DESELECT')
     print(f"\n✓ 5 layer import: {time.time()-t0:.1f} seconds")

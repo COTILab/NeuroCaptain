@@ -220,7 +220,14 @@ def run_redbird_simulation():
     nodes = mesh_data.nodes.copy()
     elems = mesh_data.elems.copy()
     tissue_labels = mesh_data.tissue_labels.copy()
-    
+
+    # Parcels (> 100) -> gray matter; SPM 1-5 order -> NeuroCaptain/Redbird.
+    from .lightsim_neurocaptain import prepare_solver_labels, _scene_tissue_order
+    region_labels = tissue_labels.copy()  # kept for ROI analysis
+    tissue_labels, _tissue_order = prepare_solver_labels(
+        tissue_labels, nodes, elems, _scene_tissue_order(),
+        mesh_data.layer_info)
+
     full_nodes = nodes.copy()
     
     print(f"\nFull mesh: {len(nodes):,} nodes, {len(elems):,} elements")
@@ -642,6 +649,9 @@ def run_redbird_simulation():
                 if space.type == 'VIEW_3D':
                     space.shading.type = 'SOLID'
                     space.shading.color_type = 'VERTEX'
+
+    from .lightsim_neurocaptain import _reapply_parcellation_overlay
+    _reapply_parcellation_overlay()
 
     print("\n" + "=" * 70)
     print("✓ SIMULATION COMPLETE")

@@ -125,12 +125,20 @@ class ImportFiducialsTest(unittest.TestCase):
 
     def test_optional_snap_to_head(self):
         bpy.ops.braincapgen.import_fiducials_options("EXEC_DEFAULT", filepath=self.path, snap_to_head=True)
+        # Snapping goes to the closest point on the surface triangles (not the
+        # nearest vertex), so check the point is on the surface and that no
+        # vertex of the head is closer to the original point than it is.
+        from mathutils import Vector
+        from mathutils.bvhtree import BVHTree
         head = bpy.data.objects["headmesh"]
         verts = np.array([list(head.matrix_world @ v.co) for v in head.data.vertices])
+        bvh = BVHTree.FromPolygons([Vector(v) for v in verts], [list(f.vertices) for f in head.data.polygons])
         for k, xyz in FIDS.items():
-            p = self.calls[0][k]
-            self.assertLess(np.min(np.linalg.norm(verts - p, axis=1)), 1e-4, f"{k} not on a head vertex")
-            self.assertGreater(np.linalg.norm(p - np.array(xyz)), 0.5, f"{k} was not moved")
+            p, orig = np.asarray(self.calls[0][k]), np.array(xyz)
+            self.assertLess(bvh.find_nearest(Vector(p))[3], 1e-4, f"{k} not on the head surface")
+            self.assertGreater(np.linalg.norm(p - orig), 0.5, f"{k} was not moved")
+            self.assertLessEqual(np.linalg.norm(p - orig), np.min(np.linalg.norm(verts - orig, axis=1)) + 1e-6,
+                                 f"{k} is not the closest surface point")
 
     def test_generates_landmark_mesh(self):
         if not hasattr(self.mod.safe_import("iso2mesh"), "brain1020"):

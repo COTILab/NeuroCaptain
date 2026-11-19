@@ -97,6 +97,10 @@ def ShowMessageBox(message="", title="Message Box", icon="INFO"):
     def draw(self, context):
         self.layout.label(text=message)
 
+    # No window in background mode (tests/CI): a popup there crashes Blender
+    if bpy.app.background or bpy.context.window is None:
+        print(f"[{title}] {message}")
+        return
     bpy.context.window_manager.popup_menu(draw, title=title, icon=icon)
 
 
@@ -108,8 +112,12 @@ def AddMeshFromNodeFace(node, face, name):
     # Set object location in 3D space
     my_obj.location = bpy.context.scene.cursor.location
 
-    # make collection
+    # make collection (create it if the scene has none, e.g. an empty or
+    # renamed startup scene, instead of failing the whole load)
     rootcoll = bpy.context.scene.collection.children.get("Collection")
+    if rootcoll is None:
+        rootcoll = bpy.data.collections.get("Collection") or bpy.data.collections.new("Collection")
+        bpy.context.scene.collection.children.link(rootcoll)
 
     # Link object to the scene collection
     rootcoll.objects.link(my_obj)

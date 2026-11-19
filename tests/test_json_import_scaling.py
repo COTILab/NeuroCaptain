@@ -132,6 +132,13 @@ class JsonImportScalingTest(unittest.TestCase):
         bpy.ops.wm.read_factory_settings(use_empty=True)
         register_addon(self.addon)
 
+    def tearDown(self):
+        # Don't leave the cloth-simulated probe in the scene: the next test
+        # file's depsgraph evaluation would re-run the cloth (hangs on 5.2,
+        # crashes 3.6 in CI).
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        register_addon(self.addon)
+
     def _build_scene(self, scale):
         bpy.ops.mesh.primitive_uv_sphere_add(radius=R0 * scale, segments=128, ring_count=64)
         bpy.context.active_object.name = "headmesh"

@@ -235,6 +235,65 @@ def compute_short_sep_flags(optodes_with_positions, threshold_mm):
     return flags
 
 
+def spring_record(n1, n2, pos1, pos2, rest_length, is_flexible, touches_anchor,
+                  design_rest_length=None):
+    """
+    One spring's registered state.
+
+    strain = (length - rest) / rest, using this subject's rest length, so it
+    measures how much the spring deformed rather than how big the head is.
+    Stiff springs should have strain ~0 on every subject.
+    """
+    length = _dist(pos1, pos2)
+    rest = float(rest_length) if rest_length is not None else None
+    strain = (length - rest) / rest if rest and rest > 1e-6 else None
+    return {
+        "optode1": n1,
+        "optode2": n2,
+        "kind": "flexible" if is_flexible else "stiff",
+        "touches_anchor": bool(touches_anchor),
+        "rest_length_mm": round(rest, 6) if rest is not None else None,
+        "design_rest_length_mm": round(float(design_rest_length), 6)
+        if design_rest_length is not None else None,
+        "length_mm": round(length, 6),
+        "strain": round(strain, 6) if strain is not None else None,
+    }
+
+
+def get_springs(positions, anchor_names):
+    """
+    Springs from the Optode_Connections object with their registered lengths.
+
+    positions    : {optode_name: world position}
+    anchor_names : names of anchor optodes
+    Returns [] if no connections/spring states exist.
+    """
+    conn = bpy.data.objects.get("Optode_Connections")
+    if conn is None or not conn.get("spring_states"):
+        return []
+    states = conn["spring_states"].to_dict()
+    # JSON import scales rest lengths to the head; recover the designed value
+    rest_scale = float(conn.get("rest_length_scale", 1.0)) or 1.0
+
+    springs = []
+    for ss in states.values():
+        n1, n2 = ss.get("optode1"), ss.get("optode2")
+        if n1 not in positions or n2 not in positions:
+            continue
+        rest = ss.get("rest_length")
+        design = ss.get("design_rest_length")
+        if design is None and rest is not None:
+            design = float(rest) / rest_scale
+        springs.append(spring_record(
+            n1, n2, positions[n1], positions[n2], rest,
+            ss.get("is_flexible", False),
+            n1 in anchor_names or n2 in anchor_names,
+            design_rest_length=design,
+        ))
+    springs.sort(key=lambda s: (s["optode1"], s["optode2"]))
+    return springs
+
+
 def bary_snap(pos, lm_obj, depsgraph):
     """
     Snap a world position to the nearest point on LandmarkMesh.
@@ -354,6 +413,11 @@ def build_subject_data(context, subject_id):
     for k, v in lm.items():
         landmarks_out[k] = [round(c, 6) for c in v]
 
+    springs_out = get_springs(
+        dict(opt_name_pos),
+        {o["name"] for o in optodes_out if o["is_anchor"]},
+    )
+
     return {
         "format_version": FORMAT_VERSION,
         "coordsys": COORDSYS,
@@ -370,6 +434,7 @@ def build_subject_data(context, subject_id):
             "scale_z_mm": round(frame["scale_z"], 6),
         },
         "optodes": optodes_out,
+        "springs": springs_out,
     }
 
 
@@ -854,80 +919,133 @@ def compute_m4_barycentric_consistency(subjects, optode_names,
     return m4_rms, m4_sd, m4_max, m4_weight_sd
 
 
-def compute_edge_distances(subjects, optode_names, probe_json_path=None):
+def _subject_springs(subj, probe_springs):
     """
-    Compute per-edge inter-optode distances across subjects.
+    {(optode1, optode2): spring record} for one subject.
 
-    For each connection in the probe JSON, measures the Euclidean distance
-    between the two connected optodes in each subject's world_pos coordinates.
-    Reports mean, SD, and deviation from the defined rest_length.
-
-    Edge type classification:
-      - "anchor"   — at least one endpoint is an anchor optode
-      - "stiff"    — is_flexible=False, neither endpoint is anchor
-      - "flexible" — is_flexible=True, neither endpoint is anchor
+    Uses the springs stored in the subject JSON; for older exports without
+    them, measures the probe JSON's connections on the subject's world_pos.
     """
+    if subj.get("springs"):
+        return {tuple(sorted((s["optode1"], s["optode2"]))): s for s in subj["springs"]}
+
+    lookup = {o["name"]: o for o in subj["optodes"]}
+    out = {}
+    for ps in probe_springs:
+        o1, o2 = lookup.get(ps["optode1"]), lookup.get(ps["optode2"])
+        if o1 is None or o2 is None or o1.get("world_pos") is None or o2.get("world_pos") is None:
+            continue
+        out[tuple(sorted((ps["optode1"], ps["optode2"])))] = spring_record(
+            ps["optode1"], ps["optode2"], o1["world_pos"], o2["world_pos"],
+            ps["rest_length"], ps["is_flexible"], ps["touches_anchor"],
+            design_rest_length=ps["rest_length"],
+        )
+    return out
+
+
+def _probe_json_springs(probe_json_path):
     if not probe_json_path or not os.path.isfile(probe_json_path):
         return []
-
     with open(probe_json_path, "r") as f:
         probe_data = json.load(f)
+    anchors = {o["name"] for o in probe_data.get("optodes", []) if o.get("is_anchor")}
+    return [{
+        "optode1": cd["optode1"], "optode2": cd["optode2"],
+        "rest_length": float(cd.get("rest_length", 0)) or None,
+        "is_flexible": cd.get("is_flexible", False),
+        "touches_anchor": cd["optode1"] in anchors or cd["optode2"] in anchors,
+    } for cd in probe_data.get("connections", [])]
 
-    anchor_set = set()
-    for opt in probe_data.get("optodes", []):
-        if opt.get("is_anchor", False):
-            anchor_set.add(opt["name"])
+
+def compute_edge_distances(subjects, optode_names, probe_json_path=None):
+    """
+    Spring-length variability across subjects, per spring.
+
+    Springs come from each subject JSON's "springs" (falling back to the
+    probe JSON's connections for older exports).  For every spring present
+    in all subjects:
+      mean/sd/min/max_dist  registered length (mm) across subjects
+      cv                    sd / mean
+      mean_strain, sd_strain  (length - rest) / rest, rest = that subject's
+                              rest length - deformation independent of head size
+      mean_deviation        mean length - mean rest (mm)
+
+    Stiff springs model rigid probe parts, so their length and strain
+    variation should be ~0; flexible springs are allowed to stretch.
+    edge_type is "stiff" or "flexible"; touches_anchor flags springs with an
+    anchored endpoint.
+    """
+    probe_springs = [] if all(s.get("springs") for s in subjects) \
+        else _probe_json_springs(probe_json_path)
+    per_subject = [_subject_springs(s, probe_springs) for s in subjects]
+    if not per_subject or not per_subject[0]:
+        return []
 
     optode_name_set = set(optode_names)
+    common = set(per_subject[0])
+    for ps in per_subject[1:]:
+        common &= set(ps)
+
     results = []
-
-    for cd in probe_data.get("connections", []):
-        n1, n2 = cd["optode1"], cd["optode2"]
-        if n1 not in optode_name_set or n2 not in optode_name_set:
+    for key in sorted(common):
+        if key[0] not in optode_name_set or key[1] not in optode_name_set:
             continue
-
-        is_flexible = cd.get("is_flexible", False)
-        fix_dist = cd.get("fix_distance", False)
-        rest_length = float(cd.get("rest_length", 0))
-
-        if n1 in anchor_set or n2 in anchor_set:
-            edge_type = "anchor"
-        elif is_flexible:
-            edge_type = "flexible"
-        elif fix_dist:
-            edge_type = "stiff*"
-        else:
-            edge_type = "stiff"
-
-        distances = []
-        for subj in subjects:
-            lookup = {o["name"]: o for o in subj["optodes"]}
-            o1 = lookup.get(n1)
-            o2 = lookup.get(n2)
-            if o1 is None or o2 is None:
-                continue
-            wp1 = o1.get("world_pos")
-            wp2 = o2.get("world_pos")
-            if wp1 is None or wp2 is None:
-                continue
-            distances.append(_dist(wp1, wp2))
-
-        if distances:
-            arr = np.array(distances)
-            results.append({
-                "optode1": n1,
-                "optode2": n2,
-                "edge_type": edge_type,
-                "rest_length": rest_length,
-                "n_subjects": len(distances),
-                "mean_dist": float(np.mean(arr)),
-                "sd_dist": float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
-                "min_dist": float(np.min(arr)),
-                "max_dist": float(np.max(arr)),
-                "mean_deviation": float(np.mean(arr) - rest_length),
-            })
-
+        recs = [ps[key] for ps in per_subject]
+        lengths = np.array([r["length_mm"] for r in recs], dtype=float)
+        rests = [r["rest_length_mm"] for r in recs if r.get("rest_length_mm")]
+        strains = np.array([r["strain"] for r in recs if r.get("strain") is not None], dtype=float)
+        mean_rest = float(np.mean(rests)) if rests else 0.0
+        n = len(lengths)
+        results.append({
+            "optode1": recs[0]["optode1"],
+            "optode2": recs[0]["optode2"],
+            "edge_type": recs[0]["kind"],
+            "touches_anchor": any(r["touches_anchor"] for r in recs),
+            "rest_length": mean_rest,
+            "design_rest_length": recs[0].get("design_rest_length_mm") or mean_rest,
+            "n_subjects": n,
+            "mean_dist": float(np.mean(lengths)),
+            "sd_dist": float(np.std(lengths, ddof=1)) if n > 1 else 0.0,
+            "min_dist": float(np.min(lengths)),
+            "max_dist": float(np.max(lengths)),
+            "cv": float(np.std(lengths, ddof=1) / np.mean(lengths)) if n > 1 and np.mean(lengths) > 0 else 0.0,
+            "mean_deviation": float(np.mean(lengths) - mean_rest) if rests else 0.0,
+            "mean_strain": float(np.mean(strains)) if len(strains) else None,
+            "sd_strain": float(np.std(strains, ddof=1)) if len(strains) > 1 else None,
+            "mean_abs_strain": float(np.mean(np.abs(strains))) if len(strains) else None,
+        })
     return results
+
+
+def summarize_spring_variability(edge_dists):
+    """
+    Stiff vs flexible summary rows: [(kind, stats dict), ...].
+    "stiff (free)" excludes springs touching an anchor.
+    """
+    groups = [
+        ("stiff", [e for e in edge_dists if e["edge_type"] == "stiff"]),
+        ("stiff (free)", [e for e in edge_dists if e["edge_type"] == "stiff" and not e["touches_anchor"]]),
+        ("flexible", [e for e in edge_dists if e["edge_type"] == "flexible"]),
+    ]
+    rows = []
+    for label, subset in groups:
+        if not subset:
+            continue
+        sds = np.array([e["sd_dist"] for e in subset])
+        sd_strain = [e["sd_strain"] for e in subset if e["sd_strain"] is not None]
+        abs_strain = [e["mean_abs_strain"] for e in subset if e["mean_abs_strain"] is not None]
+        worst = subset[int(np.argmax(sds))]
+        rows.append((label, {
+            "n_springs": len(subset),
+            "mean_sd_mm": float(np.mean(sds)),
+            "median_sd_mm": float(np.median(sds)),
+            "max_sd_mm": float(np.max(sds)),
+            "max_sd_spring": f"{worst['optode1']}-{worst['optode2']}",
+            "mean_cv": float(np.mean([e["cv"] for e in subset])),
+            "mean_sd_strain": float(np.mean(sd_strain)) if sd_strain else None,
+            "mean_abs_strain": float(np.mean(abs_strain)) if abs_strain else None,
+        }))
+    return rows
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1253,43 +1371,38 @@ def export_summary_csv(filepath, optode_names, optode_type_map, stats,
                 optode_names[int(np.argmax(arr))],
             ])
 
-        # ── Inter-optode edge distances ─────────────────────────────
+        # ── Spring-length variability ───────────────────────────────
         if edge_dists:
+            def _r(v, nd=4):
+                return round(v, nd) if v is not None else ""
+
             writer.writerow([])
-            writer.writerow(["# Inter-Optode Edge Distances"])
+            writer.writerow(["# Spring Length Variability (stiff springs should vary ~0)"])
             writer.writerow([
-                "optode1", "optode2", "edge_type",
-                "rest_length_mm", "n_subjects",
-                "mean_dist_mm", "sd_dist_mm",
-                "min_dist_mm", "max_dist_mm",
-                "mean_deviation_mm",
+                "optode1", "optode2", "spring_type", "touches_anchor",
+                "design_rest_length_mm", "rest_length_mm", "n_subjects",
+                "mean_length_mm", "sd_length_mm", "cv",
+                "min_length_mm", "max_length_mm", "mean_deviation_mm",
+                "mean_strain", "sd_strain", "mean_abs_strain",
             ])
             for ed in edge_dists:
                 writer.writerow([
-                    ed["optode1"], ed["optode2"], ed["edge_type"],
-                    round(ed["rest_length"], 4),
-                    ed["n_subjects"],
-                    round(ed["mean_dist"], 4),
-                    round(ed["sd_dist"], 4),
-                    round(ed["min_dist"], 4),
-                    round(ed["max_dist"], 4),
-                    round(ed["mean_deviation"], 4),
+                    ed["optode1"], ed["optode2"], ed["edge_type"], int(ed["touches_anchor"]),
+                    _r(ed["design_rest_length"]), _r(ed["rest_length"]), ed["n_subjects"],
+                    _r(ed["mean_dist"]), _r(ed["sd_dist"]), _r(ed["cv"], 5),
+                    _r(ed["min_dist"]), _r(ed["max_dist"]), _r(ed["mean_deviation"]),
+                    _r(ed["mean_strain"], 5), _r(ed["sd_strain"], 5), _r(ed["mean_abs_strain"], 5),
                 ])
 
             writer.writerow([])
-            writer.writerow(["# Edge Distance Summary"])
-            writer.writerow(["edge_type", "n_edges",
-                             "mean_abs_deviation_mm", "mean_sd_mm"])
-            for typ in ("anchor", "stiff", "stiff*", "flexible"):
-                subset = [e for e in edge_dists if e["edge_type"] == typ]
-                if subset:
-                    writer.writerow([
-                        typ, len(subset),
-                        round(float(np.mean([abs(e["mean_deviation"])
-                                             for e in subset])), 4),
-                        round(float(np.mean([e["sd_dist"]
-                                             for e in subset])), 4),
-                    ])
+            writer.writerow(["# Spring Length Summary: stiff vs flexible"])
+            writer.writerow(["spring_type", "n_springs", "mean_sd_mm", "median_sd_mm",
+                             "max_sd_mm", "max_sd_spring", "mean_cv",
+                             "mean_sd_strain", "mean_abs_strain"])
+            for label, s in summarize_spring_variability(edge_dists):
+                writer.writerow([label, s["n_springs"], _r(s["mean_sd_mm"]), _r(s["median_sd_mm"]),
+                                 _r(s["max_sd_mm"]), s["max_sd_spring"], _r(s["mean_cv"], 5),
+                                 _r(s["mean_sd_strain"], 5), _r(s["mean_abs_strain"], 5)])
 
         # ── AtlasViewer-comparable section ───────────────────────────
         # Centroid-translated world coordinates, sample SD (ddof=1),
@@ -1574,15 +1687,15 @@ class NEUROCAPTAIN_OT_run_variability(bpy.types.Operator):
         print("=" * 70 + "\n")
 
         if edge_dists:
-            print(f"\n  Inter-optode edge distances ({len(edge_dists)} edges):")
-            for typ in ("anchor", "stiff", "stiff*", "flexible"):
-                subset = [e for e in edge_dists if e["edge_type"] == typ]
-                if subset:
-                    devs = [abs(e["mean_deviation"]) for e in subset]
-                    sds = [e["sd_dist"] for e in subset]
-                    print(f"    {typ:10s}  N={len(subset):2d}  "
-                          f"mean|dev|={np.mean(devs):.3f} mm  "
-                          f"mean SD={np.mean(sds):.3f} mm")
+            print(f"\n  Spring length variability ({len(edge_dists)} springs) "
+                  f"- stiff springs should vary ~0:")
+            for label, s in summarize_spring_variability(edge_dists):
+                strain = (f"  mean|strain|={s['mean_abs_strain'] * 100:.2f}%"
+                          if s["mean_abs_strain"] is not None else "")
+                print(f"    {label:13s} N={s['n_springs']:3d}  "
+                      f"mean SD={s['mean_sd_mm']:.3f} mm  "
+                      f"max SD={s['max_sd_mm']:.3f} mm ({s['max_sd_spring']})  "
+                      f"CV={s['mean_cv'] * 100:.2f}%{strain}")
 
         csv_path = os.path.join(self.directory, self.csv_filename)
         export_summary_csv(

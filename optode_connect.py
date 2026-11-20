@@ -111,6 +111,150 @@ def add_to_collection(obj, collection):
     # Link to target collection
     collection.objects.link(obj)
 
+
+# ── Spring stiffness encoding ─────────────────────────────────────────────────
+# A spring's stiffness lives in two places that must agree:
+#   conn_obj["spring_states"][key]  - exported to / imported from probe JSON
+#   edge crease + bevel weight      - 1.0 flexible, 0.0 stiff (viewport display)
+# "design_rest_length" is set when a spring's length is defined explicitly
+# (SD SpringList, probe JSON, Make Stiff with a target distance); JSON export
+# uses it for stiff springs so the designed length survives registration on
+# other heads.  Without it, export falls back to the current distance.
+
+def spring_key(optode1, optode2):
+    a, b = sorted((optode1, optode2))
+    return f"{a}_{b}"
+
+
+def edge_spring_layers(bm):
+    """(crease, bevel_weight) edge layers; Blender 4.0+ moved them to float attributes."""
+    layers = bm.edges.layers
+    if hasattr(layers, "crease"):
+        return layers.crease.verify(), layers.bevel_weight.verify()
+    floats = layers.float
+    return (floats.get("crease_edge") or floats.new("crease_edge"),
+            floats.get("bevel_weight_edge") or floats.new("bevel_weight_edge"))
+
+
+def set_spring_stiff(spring_states, optode1, optode2, rest_length,
+                     edge=None, layers=None, fix_distance=False, design_rest_length=None):
+    """Mark a spring stiff (pull/push 0.9) in spring_states and on its edge."""
+    key = spring_key(optode1, optode2)
+    fields = {
+        "rest_length": float(rest_length),
+        "pull": 0.9,
+        "push": 0.9,
+        "is_flexible": False,
+        "fix_distance": bool(fix_distance),
+    }
+    if key in spring_states:
+        for k, v in fields.items():
+            spring_states[key][k] = v
+        if design_rest_length is None and "design_rest_length" in spring_states[key]:
+            del spring_states[key]["design_rest_length"]
+    else:
+        spring_states[key] = {"optode1": optode1, "optode2": optode2, **fields}
+    if design_rest_length is not None:
+        spring_states[key]["design_rest_length"] = float(design_rest_length)
+    if edge is not None:
+        crease, bevel = layers
+        edge[crease] = 0.0
+        edge[bevel] = 0.0
+
+
+def set_spring_flexible(spring_states, optode1, optode2, rest_length,
+                        edge=None, layers=None, pull=0.3, push=0.3):
+    """Mark a spring flexible in spring_states and on its edge."""
+    spring_states[spring_key(optode1, optode2)] = {
+        "optode1": optode1,
+        "optode2": optode2,
+        "rest_length": float(rest_length),
+        "pull": float(pull),
+        "push": float(push),
+        "is_flexible": True,
+    }
+    if edge is not None:
+        crease, bevel = layers
+        edge[crease] = 1.0
+        edge[bevel] = 1.0
+
+
+def ensure_flexible_visuals(obj):
+    """Material and bevel modifier that display flexible (bevel-weighted) edges."""
+    mat_name = "Optode_Connection_Flexible"
+    if mat_name not in bpy.data.materials:
+        mat = bpy.data.materials.new(name=mat_name)
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+        nodes.clear()
+
+        node_emission = nodes.new(type='ShaderNodeEmission')
+        node_emission.inputs[0].default_value = (1.0, 0.6, 0.0, 1.0)
+        node_emission.inputs[1].default_value = 2.0
+
+        node_output = nodes.new(type='ShaderNodeOutputMaterial')
+        mat.node_tree.links.new(node_emission.outputs[0], node_output.inputs[0])
+
+    if "Bevel_Springs" not in obj.modifiers:
+        bevel_mod = obj.modifiers.new(name="Bevel_Springs", type='BEVEL')
+        bevel_mod.width = 0.5
+        bevel_mod.segments = 2
+        bevel_mod.limit_method = 'WEIGHT'
+        bevel_mod.affect = 'EDGES'
+
+
+def encode_spring_states_on_mesh(obj, names_ordered):
+    """Write each spring's stiffness from obj["spring_states"] onto its edge crease/bevel."""
+    states = obj.get("spring_states", {})
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    layers = edge_spring_layers(bm)
+    n_flex = 0
+    for edge in bm.edges:
+        i1, i2 = edge.verts[0].index, edge.verts[1].index
+        if i1 >= len(names_ordered) or i2 >= len(names_ordered):
+            continue
+        ss = states.get(spring_key(names_ordered[i1], names_ordered[i2]))
+        flexible = bool(ss and ss.get("is_flexible", False))
+        edge[layers[0]] = edge[layers[1]] = 1.0 if flexible else 0.0
+        n_flex += flexible
+    bm.to_mesh(obj.data)
+    bm.free()
+    if n_flex:
+        ensure_flexible_visuals(obj)
+    return n_flex
+
+# ── Dummy optodes ─────────────────────────────────────────────────────────────
+# AtlasViewer SD probes anchor "dummy" optodes (points that are not a source or
+# detector) to 10-20 landmarks.  They are imported as Dummy_N objects that
+# register and pin exactly like any other anchor optode.  When hidden, the
+# object is hidden and its springs stay in spring_states (used for
+# registration) but get no edge on the connection mesh (not drawn).
+# Everything that collects optodes by the Source_/Detector_ prefix skips them.
+
+DUMMY_COLOR = (0.55, 0.55, 0.55, 1.0)
+DUMMY_COLLECTION = "Dummy Optodes"
+
+
+def is_dummy_name(name):
+    return name.startswith("Dummy_")
+
+
+def set_dummy_visibility(obj, show):
+    """Show or hide a dummy optode (and its anchor ring)."""
+    obj["show_dummy"] = 1 if show else 0
+    obj.hide_render = not show          # anchor rings are never rendered
+    for o in [obj, *obj.children]:
+        if o.name in bpy.context.view_layer.objects:
+            o.hide_set(not show)
+
+
+def hidden_dummy_names():
+    return {o.name for o in bpy.data.objects
+            if is_dummy_name(o.name) and not o.get("show_dummy", 1)}
+
+
 ## OPERATORS ##
 class NEUROCAPTAIN_OT_create_optode_connections(bpy.types.Operator):
     """Create edges connecting nearby optodes with soft body springs"""
@@ -416,26 +560,22 @@ class NEUROCAPTAIN_OT_modify_spring_properties(bpy.types.Operator):
             return {'CANCELLED'}
         
         bm = bmesh.from_edit_mesh(obj.data)
-        bevel_layer = bm.edges.layers.bevel_weight.verify()
-        crease_layer = bm.edges.layers.crease.verify()
-        
+        layers = edge_spring_layers(bm)
+
         spring_states = obj.get("spring_states", {})
-        
+
         num_modified = 0
         for edge in bm.edges:
             if edge.select:
                 v1_idx = edge.verts[0].index
                 v2_idx = edge.verts[1].index
-                
+
                 if v1_idx >= len(optode_names) or v2_idx >= len(optode_names):
                     continue
-                    
+
                 optode1_name = optode_names[v1_idx]
                 optode2_name = optode_names[v2_idx]
-                
-                optode_pair = sorted([optode1_name, optode2_name])
-                edge_key = f"{optode_pair[0]}_{optode_pair[1]}"
-                
+
                 # Use actual optode world positions — mesh verts may be stale
                 # if optodes were moved since the last connection sync.
                 o1_obj = context.scene.objects.get(optode1_name)
@@ -445,48 +585,21 @@ class NEUROCAPTAIN_OT_modify_spring_properties(bpy.types.Operator):
                 else:
                     rest_length = (edge.verts[0].co - edge.verts[1].co).length
                 # update to spring states for json export
-                spring_states[edge_key] = {
-                    "optode1": optode1_name,
-                    "optode2": optode2_name,
-                    "rest_length": rest_length,
-                    "pull": self.spring_pull,
-                    "push": self.spring_push,
-                    "is_flexible": True
-                }
-                
-                edge[bevel_layer] = 1.0
-                edge[crease_layer] = 1.0
-                
+                set_spring_flexible(spring_states, optode1_name, optode2_name, rest_length,
+                                    edge=edge, layers=layers,
+                                    pull=self.spring_pull, push=self.spring_push)
+
                 num_modified += 1
-        
+
         if num_modified == 0:
             self.report({'ERROR'}, "No edges selected")
             return {'CANCELLED'}
-        
+
         obj["spring_states"] = spring_states
         bmesh.update_edit_mesh(obj.data)
-        
-        mat_name = "Optode_Connection_Flexible"
-        if mat_name not in bpy.data.materials:
-            mat = bpy.data.materials.new(name=mat_name)
-            mat.use_nodes = True
-            nodes = mat.node_tree.nodes
-            nodes.clear()
-            
-            node_emission = nodes.new(type='ShaderNodeEmission')
-            node_emission.inputs[0].default_value = (1.0, 0.6, 0.0, 1.0)
-            node_emission.inputs[1].default_value = 2.0
-            
-            node_output = nodes.new(type='ShaderNodeOutputMaterial')
-            mat.node_tree.links.new(node_emission.outputs[0], node_output.inputs[0])
-        
-        if "Bevel_Springs" not in obj.modifiers:
-            bevel_mod = obj.modifiers.new(name="Bevel_Springs", type='BEVEL')
-            bevel_mod.width = 0.5
-            bevel_mod.segments = 2
-            bevel_mod.limit_method = 'WEIGHT'
-            bevel_mod.affect = 'EDGES'
-        
+
+        ensure_flexible_visuals(obj)
+
         # Capture current world positions of all anchors found via the
         # Anchor Indicators collection so relaxation can snap them back.
         anchor_coll = bpy.data.collections.get("Anchor Indicators")
@@ -615,11 +728,10 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
             return {'CANCELLED'}
         
         bm = bmesh.from_edit_mesh(obj.data)
-        bevel_layer = bm.edges.layers.bevel_weight.verify()
-        crease_layer = bm.edges.layers.crease.verify()
-        
+        layers = edge_spring_layers(bm)
+
         spring_states = obj.get("spring_states", {})
-        
+
         head_mesh = None
         if self.set_distance and self.distance_type == 'GEODESIC':
             head_obj = context.scene.objects.get("headmesh")
@@ -641,10 +753,7 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
                     
                 optode1_name = optode_names[v1_idx]
                 optode2_name = optode_names[v2_idx]
-                
-                optode_pair = sorted([optode1_name, optode2_name])
-                edge_key = f"{optode_pair[0]}_{optode_pair[1]}"
-                
+
                 if self.set_distance:
                     rest_length = self.target_distance
                     edges_to_update.append((optode1_name, optode2_name, edge))
@@ -657,27 +766,11 @@ class NEUROCAPTAIN_OT_make_spring_stiff(bpy.types.Operator):
                         rest_length = (o1_obj.location - o2_obj.location).length
                     else:
                         rest_length = (edge.verts[0].co - edge.verts[1].co).length
-                
-                if edge_key in spring_states:
-                    spring_states[edge_key]["rest_length"] = rest_length
-                    spring_states[edge_key]["pull"] = 0.9
-                    spring_states[edge_key]["push"] = 0.9
-                    spring_states[edge_key]["is_flexible"] = False
-                    spring_states[edge_key]["fix_distance"] = self.fix_distance
-                else:
-                    spring_states[edge_key] = {
-                        "optode1": optode1_name,
-                        "optode2": optode2_name,
-                        "rest_length": rest_length,
-                        "pull": 0.9,
-                        "push": 0.9,
-                        "is_flexible": False,
-                        "fix_distance": self.fix_distance,
-                    }
-                
-                edge[bevel_layer] = 0.0
-                edge[crease_layer] = 0.0
-                
+
+                set_spring_stiff(spring_states, optode1_name, optode2_name, rest_length,
+                                 edge=edge, layers=layers, fix_distance=self.fix_distance,
+                                 design_rest_length=self.target_distance if self.set_distance else None)
+
                 num_processed += 1
         
         if num_processed == 0:
@@ -891,7 +984,13 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
         # ── Gather optodes ───────────────────────────────────────────────
         optodes = []
         for obj in bpy.data.objects:
-            if not (obj.name.startswith("Source_") or obj.name.startswith("Detector_")):
+            if obj.name.startswith("Source_"):
+                optode_type = "source"
+            elif obj.name.startswith("Detector_"):
+                optode_type = "detector"
+            elif is_dummy_name(obj.name):
+                optode_type = "dummy"
+            else:
                 continue
 
             optode_eval = obj.evaluated_get(depsgraph)
@@ -900,7 +999,7 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
             optode_data = {
                 "name": obj.name,
                 "position": [float(optode_pos.x), float(optode_pos.y), float(optode_pos.z)],
-                "type": "source" if obj.name.startswith("Source_") else "detector",
+                "type": optode_type,
                 "is_anchor": bool(obj.get("is_anchor", False)),
             }
 
@@ -939,7 +1038,11 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
                 n1, n2 = props["optode1"], props["optode2"]
                 o1 = bpy.data.objects.get(n1)
                 o2 = bpy.data.objects.get(n2)
-                if o1 and o2:
+                if not props["is_flexible"] and "design_rest_length" in props:
+                    # Explicitly defined length (SD/JSON import, Make Stiff
+                    # target) - keep it rather than the registered distance
+                    current_rest = float(props["design_rest_length"])
+                elif o1 and o2:
                     current_rest = (o1.location - o2.location).length
                 else:
                     current_rest = float(props["rest_length"])
@@ -963,6 +1066,7 @@ class NEUROCAPTAIN_OT_export_optode_json(bpy.types.Operator):
             "metadata": {
                 "num_sources": len([o for o in optodes if o["type"] == "source"]),
                 "num_detectors": len([o for o in optodes if o["type"] == "detector"]),
+                "num_dummies": len([o for o in optodes if o["type"] == "dummy"]),
                 "num_connections": len(springs),
                 "num_anchors": len([o for o in optodes if o["is_anchor"]]),
                 "num_landmarks": len(landmark_labels) if landmark_labels else 0,
@@ -1198,14 +1302,22 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
             snapped_pos, surface_normal = self._snap_to_surface(initial_pos, head_bvh)
 
             # Create the disc
-            color = SRC_COLOR if optode_type == "source" else DET_COLOR
-            collection_name = "Sources" if optode_type == "source" else "Detectors"
+            color, collection_name = {
+                "source": (SRC_COLOR, "Sources"),
+                "dummy":  (DUMMY_COLOR, DUMMY_COLLECTION),
+            }.get(optode_type, (DET_COLOR, "Detectors"))
             coll = get_or_create_collection(collection_name)
 
             optode = self._create_optode_disc(snapped_pos, surface_normal, name,
                                               color, optode_diameter, optode_thickness)
             add_to_collection(optode, coll)
             optode["is_anchor"] = 1 if is_anchor else 0
+            if optode_type == "dummy":
+                props = optode_data.get("custom_properties", {})
+                optode["is_dummy"] = 1
+                optode["show_dummy"] = int(props.get("show_dummy", 1))
+                if "anchor_landmark" in props:
+                    optode["anchor_landmark"] = props["anchor_landmark"]
 
             # Anchor ring
             if is_anchor:
@@ -1336,6 +1448,11 @@ class NEUROCAPTAIN_OT_import_optode_json(bpy.types.Operator):
         sb_settings.use_edge_collision = False
         sb_settings.use_face_collision = False
         sb_settings.use_self_collision = False
+
+        # Soft body needs every edge, so springs to hidden dummies stay drawn here
+        for oname, optode in optode_objects.items():
+            if is_dummy_name(oname):
+                set_dummy_visibility(optode, optode.get("show_dummy", 1))
 
         self.report(
             {'INFO'},
